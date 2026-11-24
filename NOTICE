@@ -5,8 +5,10 @@ This product includes software developed at Lavatti (https://lavatti.com).
 
 Third-party material
 - jose (MIT) - JWT verification.
-- Ideas and screen structure studied from DelvyG/chatwoot-portal (no licence file in that repository; used with the
-  verbal permission of its owner relayed by the Foyerdesk owner on 2026-11-24, code is rewritten, not copied; this
-  line must be revisited if any file is copied verbatim).
+- Ideas and screen structure studied from DelvyG/chatwoot-portal. That repository has no licence file, so no rights are
+  granted by it. The Foyerdesk owner relayed the author's verbal agreement on 2026-11-24; this is not a written licence
+  and has not been confirmed in writing. No file is copied and the code is written independently. A written
+  confirmation from the author is still to be obtained (see docs/ROADMAP.md); if any file is ever copied verbatim, that
+  confirmation must exist first.
 - Structure patterns studied (no code copied) from FreeScout (AGPL-3.0), KiteDesk (AGPL-3.0) and
   Chatwoot Client Portal by ICT Shift (GPL-3.0).

@@ -40,3 +40,6 @@ The comparison with the reference projects, with priorities, is in [REFERENCE_GA
 4. Verified setups for other sign-in providers.
 5. More interface languages (dictionary file per language already exists).
 6. Rename the Durable Object classes and remove the test mode (see gaps).
+
+## Open legal item
+- Written confirmation from the author of DelvyG/chatwoot-portal about the use of its ideas and screen structure (see NOTICE). Until it exists the NOTICE text says so plainly.
