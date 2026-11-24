@@ -17,10 +17,12 @@ How FoyerDesk is meant to protect customer conversations, and what is checked by
 | Every answer carries `X-Content-Type-Options: nosniff`, HSTS and a referrer policy; CSP on the Worker's own pages; `Cache-Control: no-store` on API answers | `worker.mjs` | `oidc-negative` |
 | A failed sign-in never shows raw JSON or an internal reason: the visitor is redirected with a short `auth_error` code, the detail goes to the server log | `worker.mjs` | `oidc-negative`, acceptance |
 | The provider's picture address is not copied into Chatwoot (Chatwoot would download any address) | `contact.mjs` | acceptance |
+| The session cookie is `<id>.<HMAC>` (key derived from `SESSION_SECRET`, else a secret the Worker already has): a forged or random cookie is refused before any Durable Object is asked | `worker.mjs` | `oidc-negative` |
+| A customer is limited to 30 writes a minute (in memory, no storage write); the 31st gets 429 | `thread.mjs` | `oidc-negative` |
 | Signing out closes the contact's open live channel | `worker.mjs`, `stream.mjs` | acceptance |
 
 ## Not covered
-- **Known gaps from the 2026-11-24 independent review, not yet fixed:** the session cookie is not signed (a random value still reaches a Durable Object and is refused there); no rate limit for a signed-in visitor and the idempotency ledger has no expiry; email-link limits can be bypassed with `+` aliases and IPv6 and the link is not tied to the browser that asked for it; a visitor whose email changed at the provider is blocked (`explicit_contact_linking_required`) with no self-service way back; a socket that is open when the 15-minute session simply expires stays open until the page closes it. See `docs/ROADMAP.md`.
+- **Known gaps from the 2026-11-24 independent review, not yet fixed:** the idempotency ledger has no expiry; email-link limits can be bypassed with `+` aliases and IPv6 and the link is not tied to the browser that asked for it; a visitor whose email changed at the provider is blocked (`explicit_contact_linking_required`) with no self-service way back; a socket that is open when the 15-minute session simply expires stays open until the page closes it. See `docs/ROADMAP.md`.
 - **Attachments** are off. They need server-side type and size checks first.
 - **Rate limits** exist only for the emailed link. Cloudflare's own protections apply to the rest.
 - **A Chatwoot contact with the same email but another identifier** blocks sign-in on purpose rather than merging.

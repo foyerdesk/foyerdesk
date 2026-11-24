@@ -6,11 +6,21 @@ const chatwootOrigin = (env) => trimSlashes(String(env.CHATWOOT_BASE_URL));
 const base = (env) => `${chatwootOrigin(env)}/api/v1/accounts/${String(env.CHATWOOT_ACCOUNT_ID)}`;
 // Name of the message attribute that carries the visitor's request id, so a retried request is recognised. Changing it loses that recognition for old messages.
 let requestMarker = "foyerdesk_request_id";
+const writeLimit = 30;
 
 export class TestSupportThread extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
     if (env.REQUEST_MARKER) requestMarker = String(env.REQUEST_MARKER);
+  }
+
+  // At most `writeLimit` writes a minute per customer. Kept in memory on purpose: it costs no storage write, and a restarted object only forgets the last minute.
+  tooMany() {
+    const now = Date.now();
+    this.recent = (this.recent ?? []).filter((at) => now - at < 60000);
+    if (this.recent.length >= writeLimit) return true;
+    this.recent.push(now);
+    return false;
   }
 
   async api(path, data) {
@@ -150,6 +160,7 @@ export class TestSupportThread extends DurableObject {
   }
 
   async createTopic(mapping, requestId, input) {
+    if (this.tooMany()) return { error: "rate_limited" };
     const valid = topics.validateNewTopic(input ?? {});
     if (valid.error) return { error: valid.error };
     const digest = await this.digestOf("create", valid.subject, valid.message);
@@ -179,6 +190,7 @@ export class TestSupportThread extends DurableObject {
   }
 
   async replyTopic(mapping, id, requestId, text) {
+    if (this.tooMany()) return { error: "rate_limited" };
     const message = topics.cleanText(text);
     if (!message) return { error: "message_required" };
     if (message.length > topics.MESSAGE_MAX) return { error: "message_too_long" };
@@ -208,6 +220,7 @@ export class TestSupportThread extends DurableObject {
 
   // The customer can only close or reopen their own topic. Asking for the state it already has is not an error (double click).
   async changeTopic(mapping, id, action) {
+    if (this.tooMany()) return { error: "rate_limited" };
     const conversation = await this.ownedTopic(mapping, id);
     const target = action === "resolve" ? "resolved" : action === "reopen" ? "open" : null;
     if (!target) return { error: "invalid_action" };
@@ -220,6 +233,7 @@ export class TestSupportThread extends DurableObject {
   }
 
   async send(mapping, requestId, text) {
+    if (this.tooMany()) return "rate_limited";
     const digest = Array.from(new Uint8Array(
       await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text))
     )).join(",");

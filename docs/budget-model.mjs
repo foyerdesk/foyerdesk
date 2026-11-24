@@ -3,7 +3,7 @@
 // Per history check: 1 Worker request + 2 DO requests (session read + thread) + 1-4 Chatwoot calls.
 // ASSUMED visit (not measured): page load at 0 s, typing 0-40 s, sends at 40 s and 130 s, session ends at 900 s.
 const SESSION = 900, SENDS = [40, 130];
-const OVERHEAD = { worker: 8, doReq: 10 }; // login, callback, whoami, 2 sends, logout, first page
+const OVERHEAD = { worker: 8, doReq: 12 }; // login, callback, whoami, 2 sends, logout (+ closing the live channel), first page
 const LIMIT = 100000;
 
 function checks(schedule, tailAfterSession) {

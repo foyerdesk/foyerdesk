@@ -27,6 +27,7 @@ Settings are Cloudflare Worker **variables** (not secret, in the wrangler file) 
 |---|---|---|
 | `OIDC_ISSUER`, `OIDC_CLIENT_ID` | variable | OpenID Connect provider and application |
 | `OIDC_CLIENT_SECRET` | secret | Application secret |
+| `SESSION_SECRET` | secret, optional | Key for signing the session cookie. When unset a key is derived from `OIDC_CLIENT_SECRET`, else the webhook secret, else the Chatwoot token. Changing it signs everyone out (sessions last 15 minutes) |
 | `OIDC_FLAVOR` | variable | `logto` switches on Logto extras (direct provider links, the way of signing in). Default `generic` |
 | `LOGTO_ISSUER`, `LOGTO_CLIENT_ID`, `LOGTO_CLIENT_SECRET` | variable, variable, secret | Older names. When `OIDC_ISSUER` is unset they select the Logto layout without a discovery request |
 | `MAIL_PROVIDER` | variable | `resend` enables the emailed link (also needs the `EMAIL_LINKS` binding) |

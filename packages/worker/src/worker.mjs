@@ -113,7 +113,7 @@ async function finishSignIn(request, env, { identifier, userInfo, transaction })
   headers.append("Set-Cookie", `${cookieName}=; ${cookieFlags}; Max-Age=0`);
   headers.append("Set-Cookie", `${reauthCookie}=; ${cookieFlags}; Max-Age=0`);
   headers.append("Set-Cookie", `${retryCookie}=; ${cookieFlags}; Max-Age=0`);
-  headers.append("Set-Cookie", `${sessionCookie}=${sessionId}; ${cookieFlags}; Max-Age=${sessionLifetime}`);
+  headers.append("Set-Cookie", `${sessionCookie}=${await signedSession(env, sessionId)}; ${cookieFlags}; Max-Age=${sessionLifetime}`);
   return new Response(null, { status: 303, headers });
 }
 
@@ -240,20 +240,44 @@ async function emailVerify(request, url, env) {
   return finishSignIn(request, env, { identifier, userInfo, transaction: { returnTo: link.returnTo, source: link.source } });
 }
 
-function sessionIdFrom(request) {
-  return (request.headers.get("Cookie") ?? "").match(/(?:^|; )__Host-foyerdesk-session=([a-zA-Z0-9_-]{43})(?:;|$)/)?.[1];
+// The session cookie is "<id>.<signature>". The signature key is derived (HKDF) from a secret the Worker already has, so no new
+// secret is needed. A cookie with a wrong signature is dropped here, before any Durable Object is asked, so random
+// values cannot be used to burn the daily Durable Object quota.
+const signingKeys = new Map();
+async function signingKey(env) {
+  // SESSION_SECRET if set; otherwise a secret the Worker already has (sign-in with e-mail links needs no OIDC secret).
+  const secret = env.SESSION_SECRET ?? oidcSettings(env).clientSecret ?? env.CHATWOOT_WEBHOOK_SECRET ?? env.CHATWOOT_APPLICATION_TOKEN ?? "";
+  if (!secret) return null;
+  if (!signingKeys.has(secret)) {
+    const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), "HKDF", false, ["deriveKey"]);
+    signingKeys.set(secret, await crypto.subtle.deriveKey({ name: "HKDF", hash: "SHA-256", salt: new TextEncoder().encode("foyerdesk"), info: new TextEncoder().encode("session-cookie-v1") }, base, { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]));
+  }
+  return signingKeys.get(secret);
+}
+async function signedSession(env, id) {
+  const key = await signingKey(env);
+  if (!key) throw new Error("signing_key_unavailable");
+  return id + "." + b64url(new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(id))));
+}
+async function sessionIdFrom(request, env) {
+  const match = (request.headers.get("Cookie") ?? "").match(/(?:^|; )__Host-foyerdesk-session=([a-zA-Z0-9_-]{43})\.([a-zA-Z0-9_-]{43})(?:;|$)/);
+  if (!match) return undefined;
+  const key = await signingKey(env);
+  if (!key) return undefined;
+  const signature = Uint8Array.from(atob(match[2].replaceAll("-", "+").replaceAll("_", "/") + "="), (c) => c.charCodeAt(0));
+  return (await crypto.subtle.verify("HMAC", key, signature, new TextEncoder().encode(match[1]))) ? match[1] : undefined;
 }
 
 // Who is signed in, for the line shown on the page. Sessions created before this field existed return account null.
 async function whoAmI(request, env) {
-  const sessionId = sessionIdFrom(request);
+  const sessionId = await sessionIdFrom(request, env);
   const identity = sessionId ? await env.SUPPORT_SESSIONS.getByName(sessionId).read() : null;
   if (!identity) return result(401, { error: "sign_in_required" });
   return result(200, { account: identity.account ?? null });
 }
 
 async function messages(request, url, env) {
-  const sessionId = sessionIdFrom(request);
+  const sessionId = await sessionIdFrom(request, env);
   const identity = sessionId ? await env.SUPPORT_SESSIONS.getByName(sessionId).read() : null;
   if (!identity) return result(401, { error: "sign_in_required" });
   const { identifier, mapping } = identity;
@@ -305,6 +329,7 @@ async function messages(request, url, env) {
   try {
     const outcome = await thread.send(mapping, data.requestId.toLowerCase(), data.message.trim());
     if (outcome === "conflict") return result(409, { error: "request_id_conflict" });
+    if (outcome === "rate_limited") return result(429, { error: "rate_limited" });
     if (outcome !== "accepted") return result(503, { error: "delivery_unconfirmed" });
     // Enable a repeatable loss-of-acknowledgement test only on this isolated page.
     if (env.FULL_PAGE_INBOX_ID === undefined && request.headers.get("X-Foyerdesk-Test-Lose-Ack") === "1") {
@@ -319,7 +344,7 @@ async function messages(request, url, env) {
 
 async function logout(request, url, env) {
   if (request.headers.get("Origin") !== url.origin) return result(403, { error: "same_origin_required" });
-  const sessionId = sessionIdFrom(request);
+  const sessionId = await sessionIdFrom(request, env);
   if (sessionId) {
     const identity = await env.SUPPORT_SESSIONS.getByName(sessionId).read();
     await env.SUPPORT_SESSIONS.getByName(sessionId).revoke();
@@ -341,7 +366,7 @@ const requestIdPattern = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 async function topicsApi(request, url, env) {
   // A write from another site is refused before anything else is looked at.
   if (request.method === "POST" && request.headers.get("Origin") !== url.origin) return result(403, { error: "same_origin_required" });
-  const sessionId = sessionIdFrom(request);
+  const sessionId = await sessionIdFrom(request, env);
   const identity = sessionId ? await env.SUPPORT_SESSIONS.getByName(sessionId).read() : null;
   if (!identity || env.FULL_PAGE_INBOX_ID === undefined || identity.mapping.inboxId !== Number(env.FULL_PAGE_INBOX_ID)) {
     return result(401, { error: "sign_in_required" });
@@ -370,7 +395,7 @@ async function topicsApi(request, url, env) {
     if (text.includes("topic_not_found")) return result(404, { error: "topic_not_found" });
     return result(502, { error: "topics_unavailable" });
   };
-  const status = (code) => ({ conflict: 409, unconfirmed: 503, too_many_open_topics: 429 })[code] ?? 400;
+  const status = (code) => ({ conflict: 409, unconfirmed: 503, too_many_open_topics: 429, rate_limited: 429 })[code] ?? 400;
   try {
     // /api/support/topics
     if (route.length === 0) {
@@ -431,7 +456,7 @@ async function webhook(request, env) {
 async function stream(request, url, env) {
   if (request.headers.get("Upgrade") !== "websocket") return result(426, { error: "websocket_required" });
   if (request.headers.get("Origin") !== url.origin) return result(403, { error: "same_origin_required" });
-  const sessionId = sessionIdFrom(request);
+  const sessionId = await sessionIdFrom(request, env);
   const identity = sessionId ? await env.SUPPORT_SESSIONS.getByName(sessionId).read() : null;
   if (!identity || env.FULL_PAGE_INBOX_ID === undefined || identity.mapping.inboxId !== Number(env.FULL_PAGE_INBOX_ID)) {
     return result(401, { error: "sign_in_required" });

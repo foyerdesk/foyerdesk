@@ -35,7 +35,13 @@ async function idToken() {
 
 async function upstream(request) {
   const url = new URL(request.url);
-  assert.equal(url.origin, new URL(issuer).origin, "only the provider is called in these cases");
+  if (url.origin !== new URL(issuer).origin) { // a minimal Chatwoot: one conversation that accepts every message
+    const path = url.pathname.replace("/api/v1/accounts/1", "");
+    if (request.method === "GET" && path === "/contacts/8/conversations") return Response.json({ payload: [{ id: 44, inbox_id: 4 }] });
+    if (request.method === "GET" && path === "/conversations/44/messages") return Response.json({ payload: [] });
+    if (request.method === "POST" && path === "/conversations/44/messages") return Response.json({ id: 1 });
+    return new Response(null, { status: 503 });
+  }
   if (url.pathname.endsWith("/token")) {
     const form = new URLSearchParams(await request.text());
     verifierSeen = form.get("code_verifier");
@@ -182,8 +188,28 @@ try {
       }
     }
   });
+  await check("a session id without its signature, or with a wrong one, is refused even when the id is real", async () => {
+    const real = (await attempt()).headers.getSetCookie().find((c) => c.startsWith("__Host-foyerdesk-session=")).split(";")[0];
+    const value = real.split("=")[1];
+    const [id, signature] = value.split(".");
+    assert.equal(signature.length, 43);
+    assert.equal((await call("/api/support/session", { headers: { Cookie: real } })).status, 200);
+    for (const forged of [id, id + "." + "A".repeat(43), id + "." + signature.slice(0, -1) + (signature.endsWith("A") ? "B" : "A"), "A".repeat(43) + "." + signature]) {
+      assert.equal((await call("/api/support/session", { headers: { Cookie: "__Host-foyerdesk-session=" + forged } })).status, 401, forged);
+    }
+  });
+  await check("one customer cannot write more than 30 times a minute (the 31st is refused with 429)", async () => {
+    const cookie = (await attempt()).headers.getSetCookie().find((c) => c.startsWith("__Host-foyerdesk-session=")).split(";")[0];
+    const codes = [];
+    for (let i = 0; i < 31; i += 1) {
+      const response = await call("/api/support/messages", { method: "POST", headers: { Cookie: cookie, Origin: site, "Content-Type": "application/json" }, body: JSON.stringify({ requestId: crypto.randomUUID(), message: "hello " + i }) });
+      codes.push(response.status);
+    }
+    assert.equal(codes.filter((c) => c === 429).length, 1);
+    assert.equal(codes[30], 429);
+  });
   await check("a garbage session cookie is the same as none", async () => {
-    const response = await call("/api/support/session", { headers: { Cookie: "__Host-foyerdesk-session=" + "a".repeat(43) } });
+    const response = await call("/api/support/session", { headers: { Cookie: "__Host-foyerdesk-session=" + "a".repeat(43) + "." + "b".repeat(43) } });
     assert.equal(response.status, 401);
   });
   console.log(JSON.stringify({ status: "PASS", scope: "Local Worker runtime, simulated provider", checks: results }, null, 2));

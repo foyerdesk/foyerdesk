@@ -32,7 +32,9 @@ One topic is one Chatwoot conversation. The Worker lists them with Chatwoot's pa
 6. Messages are rendered as text, never as HTML. Attachments are off until server-side type and size checks exist.
 
 ## Live replies and the Cloudflare Free budget
-Replies arrive by push: Chatwoot webhook, then a hibernating WebSocket to the page, plus a slow safety check. `docs/budget-model.mjs` estimates the daily request use. With 100 visits an hour for 24 hours it gives about 34% of the Free Worker quota and 53% of the Durable Object quota. The visit shape (one send at 40 s, one at 130 s, one team reply) is an **assumption, not a measurement**.
+Replies arrive by push: Chatwoot webhook, then a hibernating WebSocket to the page, plus a slow safety check. `docs/budget-model.mjs` estimates the daily request use. With 100 visits an hour for 24 hours it gives about 34% of the Free Worker quota (100,000 requests a day) and 58% of the Durable Object quota (100,000 requests a day); 1,000 visits spread over a day is about 14% and 24%. Past a daily limit the Free plan refuses further operations until 00:00 UTC, so sign-in and support stop; the Workers Paid plan removes the cliff. The visit shape (one send at 40 s, one at 130 s, one team reply) is an **assumption, not a measurement**.
+
+What protects the quota from abuse: the session cookie is signed, so a random cookie is refused in the Worker before any Durable Object is asked; one customer is limited to 30 writes a minute (kept in memory, no storage write); the e-mail-link routes are off without a mail service. Not yet protected: the Worker request count itself (add one Cloudflare rate-limiting rule on `/api/*`; the Free plan allows one) and the idempotency ledger, which has no expiry.
 
 ## Not verified yet
 - Providers other than Logto against a real login.
