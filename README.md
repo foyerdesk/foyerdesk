@@ -64,18 +64,13 @@ npm test                        # Worker unit and acceptance tests, then screen 
 To put it on your own site follow [docs/installation.md](docs/installation.md). There is **no Docker image or Compose file**: the server side is a Worker and the screens are static files.
 
 ## Documentation
-[Installation](docs/installation.md) · [Configuration](docs/configuration.md) · [Chatwoot integration](docs/chatwoot-integration.md) · [Authentication](docs/authentication.md) · [Security](docs/security.md) · [Architecture](docs/architecture.md) · [Brand](docs/brand.md) · [Changelog](CHANGELOG.md)
+[Installation](docs/installation.md) · [Configuration](docs/configuration.md) · [Chatwoot integration](docs/chatwoot-integration.md) · [Authentication](docs/authentication.md) · [Security](docs/security.md) · [Architecture](docs/architecture.md) · [Brand](docs/brand.md) · [Roadmap](docs/ROADMAP.md) · [Changelog](CHANGELOG.md)
 
 ## Security
 The Chatwoot token stays on the server, every topic call checks ownership, writes need the site's own `Origin`, the webhook is signed, messages render as text. What is and is not covered: [docs/security.md](docs/security.md). Report vulnerabilities privately: [SECURITY.md](SECURITY.md).
 
-## Roadmap (planned, not implemented)
-- Email field on the sign-in card for the emailed link (the endpoint exists).
-- Run against Keycloak, Auth0 and others and move them from "unverified" to verified.
-- Attachments, after type and size checks on the server.
-- A mode for sites that already have their own users (the site signs a short token).
-- Remove the Worker's internal test mode and the `Test` prefix of two Durable Object classes.
-- More interface languages.
+## Roadmap
+What is planned, what is known to be missing and what is not yet verified: [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Contributing
 See [CONTRIBUTING.md](CONTRIBUTING.md). Bug reports and pull requests are welcome; a failing test is the best bug report.
