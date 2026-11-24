@@ -723,3 +723,107 @@ test("while the session is being checked the panel says so and is not the guest 
   await expect(page.getByTestId("topic-row")).toHaveCount(1);
   expect(await page.locator("main").count()).toBe(0);
 });
+
+// ---- from the independent UI review (2026-11-24), each fails on the code before the fix ----
+test("an unknown Chatwoot status is shown as a neutral label, never as a raw key, and no raw key appears anywhere", async ({ page }) => {
+  await mockApi(page, { topics: [row(1, { status: "Snoozed", subject: "Waiting" })] });
+  await open(page);
+  await expect(page.getByTestId("topic-row")).toHaveCount(1);
+  const text = await page.locator(".fd").innerText();
+  expect(text).not.toMatch(/\b(status|err)_[a-z_]+/);
+});
+
+test("a picture that fails to load is replaced by the initials; a non-https picture is never loaded", async ({ page }) => {
+  await page.route("https://img.example.invalid/**", (route) => route.fulfill({ status: 404, body: "" }));
+  await mockApi(page, { account: { name: "Alex Example", email: "a@b.c", provider: "google", picture: "https://img.example.invalid/gone.png" } });
+  await open(page);
+  await expect(page.getByTestId("account-card").locator("img")).toHaveCount(0);
+  await expect(page.getByTestId("account-card").locator(".fd-initials")).toHaveText("AE");
+  const second = await page.context().newPage();
+  await mockApi(second, { account: { name: "Alex Example", email: "a@b.c", provider: "google", picture: "javascript:alert(1)" } });
+  await open(second);
+  await expect(second.getByTestId("account-card")).toBeVisible();
+  await expect(second.getByTestId("account-card").locator("img")).toHaveCount(0);
+});
+
+test("initials survive an emoji in the name", async ({ page }) => {
+  await mockApi(page, { account: { name: "😀 Alex", email: "a@b.c", provider: "google", picture: null } });
+  await open(page);
+  const initials = await page.getByTestId("account-card").locator(".fd-initials").textContent();
+  expect(initials).not.toContain("\uFFFD");
+  expect(Array.from(initials ?? "")).toEqual(["😀", "A"]);
+});
+
+test("the topic filter is a navigation with the current page marked, and an unread row says so in words", async ({ page }) => {
+  await mockApi(page, { topics: [row(1, { unread: true, subject: "Needs a look" }), row(2)] });
+  await open(page);
+  await expect(page.getByRole("tab")).toHaveCount(0);
+  await expect(page.getByRole("navigation", { name: "Filter topics" }).locator("[aria-current=page]")).toHaveText("All");
+  await expect(page.getByTestId("topic-row").filter({ hasText: "Needs a look" }).getByRole("link")).toHaveAccessibleName(/^Unread: Needs a look/);
+});
+
+test("Back and a reload keep the tab and the page of the list", async ({ page }) => {
+  const resolved = Array.from({ length: 30 }, (_, i) => row(100 + i, { status: "Resolved", tab: "resolved", subject: `Done ${i}` }));
+  await mockApi(page, { topics: [row(1), ...resolved], messages: { 100: [msg(1, "visitor", "old")] } });
+  await open(page, "/#/resolved");
+  await page.getByTestId("next").click();
+  await expect(page.getByTestId("page-of")).toContainText("2");
+  expect(page.url()).toContain("#/resolved?page=2");
+  await page.getByTestId("topic-row").first().getByRole("link").click();
+  await page.getByRole("link", { name: "Back" }).click();
+  await expect(page.getByTestId("page-of")).toContainText("2");
+  expect(page.url()).toContain("#/resolved?page=2");
+  await page.reload();
+  await expect(page.getByTestId("page-of")).toContainText("2");
+});
+
+test("a 200-character subject without spaces does not push the status out of a phone screen", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 800 });
+  await mockApi(page, { topics: [row(1, { subject: "A".repeat(200) })] });
+  await open(page);
+  const wrap = page.locator(".fd-table-wrap");
+  await expect(wrap).toBeVisible();
+  expect(await wrap.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
+  const badgeBox = await page.locator(".fd-table .fd-badge").boundingBox();
+  expect(badgeBox.x + badgeBox.width).toBeLessThanOrEqual(390);
+});
+
+test("dates follow the interface language, not the browser's, and a day label from another year carries the year", async ({ browser }) => {
+  const context = await browser.newContext({ locale: "ru-RU" });
+  const page = await context.newPage();
+  const lastYear = Math.floor(new Date(new Date().getFullYear() - 1, 11, 31, 12).getTime() / 1000);
+  await mockApi(page, { topics: [row(1)], messages: { 1: [msg(1, "visitor", "Old", lastYear), msg(2, "support", "Reply", lastYear + 86400)] } });
+  await open(page, "/#/topic/1");
+  const days = await page.locator(".fd-day").allTextContents();
+  expect(days.length).toBe(2);
+  expect(days.join(" ")).toMatch(/[A-Za-z]{3}/);
+  expect(days.join(" ")).not.toMatch(/[А-Яа-я]/);
+  expect(days[0]).toContain(String(new Date().getFullYear() - 1));
+  await context.close();
+});
+
+test("with reduced motion the thread is never scrolled smoothly", async ({ browser }) => {
+  const context = await browser.newContext({ reducedMotion: "reduce" });
+  const page = await context.newPage();
+  await page.addInitScript(() => { window.__smooth = 0; const original = Element.prototype.scrollTo; Element.prototype.scrollTo = function (arg, ...rest) { if (arg && arg.behavior === "smooth") window.__smooth += 1; return original.call(this, arg, ...rest); }; });
+  const api = await mockApi(page, { topics: [row(1)], messages: { 1: Array.from({ length: 5 }, (_, i) => msg(i + 1, i % 2 ? "support" : "visitor", `m${i}`)) } });
+  await open(page, "/#/topic/1");
+  await expect(page.getByTestId("message")).toHaveCount(5);
+  api.messages[1].push(msg(6, "support", "new one"));
+  api.sockets[0]?.send("changed:1");
+  await expect(page.getByTestId("message")).toHaveCount(6);
+  expect(await page.evaluate(() => window.__smooth)).toBe(0);
+  await context.close();
+});
+
+test("the composer says what a reply does in a closed topic, 'sent' goes away when typing again, the message list is a labelled log", async ({ page }) => {
+  await mockApi(page, { topics: [row(1, { status: "Resolved", tab: "resolved" })], messages: { 1: [msg(1, "visitor", "Hello")] } });
+  await open(page, "/#/topic/1");
+  await expect(page.getByTestId("composer-hint")).toContainText("Replying reopens this topic");
+  await expect(page.getByRole("log", { name: "Messages" })).toBeVisible();
+  await page.getByLabel("Reply").fill("Thanks");
+  await page.getByTestId("send").click();
+  await expect(page.getByTestId("sent")).toBeVisible();
+  await page.getByLabel("Reply").fill("more");
+  await expect(page.getByTestId("sent")).toBeHidden();
+});

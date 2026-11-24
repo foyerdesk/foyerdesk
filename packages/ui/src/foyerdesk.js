@@ -11,16 +11,19 @@ const HEARTBEAT_MS = 50_000;
 const SESSION_RESUME_MS = 30_000;
 
 const parseRoute = () => {
-  const hash = location.hash.replace(/^#/, "") || "/";
+  const [hash, query = ""] = (location.hash.replace(/^#/, "") || "/").split("?");
+  const page = Math.max(1, Math.min(1000, Number(new URLSearchParams(query).get("page")) || 1));
   let m;
   if ((m = /^\/topic\/([0-9]{1,12})$/.exec(hash))) return { name: "topic", id: Number(m[1]) };
   if (hash === "/new") return { name: "new" };
-  if (hash === "/resolved") return { name: "list", tab: "resolved" };
-  if (hash === "/open") return { name: "list", tab: "open" };
-  return { name: "list", tab: "all" }; // the whole history, closed topics included
+  if (hash === "/resolved") return { name: "list", tab: "resolved", page };
+  if (hash === "/open") return { name: "list", tab: "open", page };
+  return { name: "list", tab: "all", page }; // the whole history, closed topics included
 };
 
-const initials = (name) => (String(name ?? "").trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase() || "?");
+// Only an https picture is shown; a broken one is replaced by the initials.
+const safeImage = (value) => { try { const u = new URL(String(value)); return u.protocol === "https:" ? u.href : null; } catch { return null; } };
+const initials = (name) => (String(name ?? "").trim().split(/\s+/).map((w) => Array.from(w)[0]).slice(0, 2).join("").toUpperCase() || "?");
 
 export function mountFoyerdesk(root, options = {}) {
   const t = translator(options.lang);
@@ -45,6 +48,9 @@ export function mountFoyerdesk(root, options = {}) {
   }
 
   // ---------- helpers ----------
+  const listHash = (tab, page) => (tab === "open" ? "#/open" : tab === "resolved" ? "#/resolved" : "#/") + (page > 1 ? "?page=" + page : "");
+  const backHref = () => (s.lastList ? listHash(s.lastList.tab, s.lastList.page) : "#/"); // Back returns to the list the person came from, with its tab and page
+  const locale = options.lang || "en"; // dates follow the interface language, not the browser's
   const knownStatuses = new Set(["open", "pending", "resolved"]);
   const statusName = (label) => (knownStatuses.has(String(label).toLowerCase()) ? String(label).toLowerCase() : "open");
   const statusKey = (label) => "status_" + statusName(label);
@@ -53,10 +59,10 @@ export function mountFoyerdesk(root, options = {}) {
     if (!Number.isFinite(at) || at <= 0) return "";
     const d = new Date(at * 1000), now = new Date();
     return d.toDateString() === now.toDateString()
-      ? d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
-      : d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: d.getFullYear() === now.getFullYear() ? undefined : "numeric" });
+      ? d.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" })
+      : d.toLocaleDateString(locale, { day: "numeric", month: "short", year: d.getFullYear() === now.getFullYear() ? undefined : "numeric" });
   };
-  const dayLabel = (at) => new Date(at * 1000).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+  const dayLabel = (at) => { const d = new Date(at * 1000); return d.toLocaleDateString(locale, { weekday: "short", day: "numeric", month: "short", year: d.getFullYear() === new Date().getFullYear() ? undefined : "numeric" }); };
   const errorText = (res) => {
     const code = res.data?.error;
     const key = code ? "err_" + code : "";
@@ -181,7 +187,7 @@ export function mountFoyerdesk(root, options = {}) {
     delete wrap.dataset.state;
     asideCard = h("div", { class: "fd-card fd-account", "data-testid": "account-card" });
     recentBox = h("nav", { class: "fd-recent", "aria-label": t("recent") });
-    badgeBox = h("div", { "aria-live": "polite" });
+    badgeBox = h("div");
     // The account "island" (who is signed in, how, and Sign out) sits above everything and stays on screen while the page or the topic list scrolls.
     const aside = h("aside", { class: "fd-aside" }, h(brandTag, { class: "fd-brand", text: brand }), badgeBox,
       h("a", { class: "fd-btn fd-primary fd-block", href: "#/new", "data-testid": "side-new-topic", text: t("newTopic") }), recentBox);
@@ -197,7 +203,7 @@ export function mountFoyerdesk(root, options = {}) {
     const name = a.name || a.email || "";
     clear(asideCard).append(
       h("div", { class: "fd-account-row" },
-        a.picture ? h("img", { class: "fd-avatar", src: a.picture, alt: "", referrerpolicy: "no-referrer" }) : h("span", { class: "fd-avatar fd-initials", "aria-hidden": "true", text: initials(name) }),
+        safeImage(a.picture) ? h("img", { class: "fd-avatar", src: safeImage(a.picture), alt: "", referrerpolicy: "no-referrer", onerror: (e) => e.target.replaceWith(h("span", { class: "fd-avatar fd-initials", "aria-hidden": "true", text: initials(name) })) }) : h("span", { class: "fd-avatar fd-initials", "aria-hidden": "true", text: initials(name) }),
         h("div", { class: "fd-account-text" },
           h("p", { class: "fd-strong", text: name || t("signedIn") }),
           a.name && a.email ? h("p", { class: "fd-muted fd-small", text: a.email }) : null,
@@ -268,7 +274,7 @@ export function mountFoyerdesk(root, options = {}) {
     clear(main);
     if (s.route.name === "new") viewNew();
     else if (s.route.name === "topic") viewTopic(s.route.id);
-    else viewList(s.route.tab, 1);
+    else { s.lastList = { tab: s.route.tab, page: s.route.page }; viewList(s.route.tab, s.route.page); }
     renderRecent();
     fitSoon();
   }
@@ -281,8 +287,8 @@ export function mountFoyerdesk(root, options = {}) {
     const mine = s.epoch;
     const view = { kind: "list", tab, page };
     s.view = view;
-    const tabLink = (name, href, key) => h("a", { role: "tab", class: "fd-tab" + (tab === name ? " fd-active" : ""), "aria-selected": String(tab === name), href, "data-testid": "tab-" + name, text: t(key) });
-    const tabs = h("div", { class: "fd-tabs", role: "tablist" }, tabLink("all", "#/", "tabAll"), tabLink("open", "#/open", "tabOpen"), tabLink("resolved", "#/resolved", "tabResolved"));
+    const tabLink = (name, href, key) => h("a", { class: "fd-tab" + (tab === name ? " fd-active" : ""), ...(tab === name ? { "aria-current": "page" } : {}), href, "data-testid": "tab-" + name, text: t(key) });
+    const tabs = h("nav", { class: "fd-tabs", "aria-label": t("topicsFilter") }, tabLink("all", "#/", "tabAll"), tabLink("open", "#/open", "tabOpen"), tabLink("resolved", "#/resolved", "tabResolved"));
     const body = h("div", { "data-testid": "topic-list" });
     clear(main).append(h("div", { class: "fd-page-head" }, h("h2", { text: t("topics") }), h("a", { class: "fd-btn fd-primary", href: "#/new", "data-testid": "new-topic", text: t("newTopic") })), tabs, body);
     body.append(h("p", { class: "fd-muted", role: "status", "data-testid": "loading", text: t("loading") }));
@@ -307,13 +313,13 @@ export function mountFoyerdesk(root, options = {}) {
     }
     const rows = data.topics.map((x) => h("tr", { "data-testid": "topic-row" },
       h("td", { class: "fd-muted", text: String(x.id) }),
-      h("td", {}, h("a", { class: "fd-subject", href: `#/topic/${x.id}` }, x.unread ? h("span", { class: "fd-unread-dot", "data-testid": "row-unread" }) : null, x.subject),
+      h("td", {}, h("a", { class: "fd-subject", href: `#/topic/${x.id}` }, x.unread ? h("span", { class: "fd-unread-dot", "data-testid": "row-unread" }) : null, x.unread ? h("span", { class: "fd-sr", text: t("unreadPrefix") + " " }) : null, x.subject),
         x.preview ? h("div", { class: "fd-preview fd-muted fd-small", text: x.preview }) : null),
       h("td", {}, badge(x.status)), h("td", { class: "fd-muted fd-small", text: when(x.at) })));
     body.append(h("div", { class: "fd-table-wrap" }, h("table", { class: "fd-table" },
       h("thead", {}, h("tr", {}, ...["colNumber", "colSubject", "colStatus", "colUpdated"].map((k) => h("th", { text: t(k) })))), h("tbody", {}, rows))));
     if (data.pages > 1) {
-      const go = (p) => viewList(tab, p);
+      const go = (p) => { location.hash = listHash(tab, p); };
       body.append(h("div", { class: "fd-pager" },
         h("button", { type: "button", class: "fd-btn fd-ghost", disabled: page <= 1, "data-testid": "prev", onclick: () => go(page - 1), text: t("prevPage") }),
         h("span", { class: "fd-muted", "data-testid": "page-of", text: t("pageOf", { page, pages: data.pages }) }),
@@ -331,7 +337,7 @@ export function mountFoyerdesk(root, options = {}) {
     const form = h("form", { class: "fd-card fd-form", novalidate: true },
       h("label", { for: "fd-subject", text: t("subject") }), subject, h("p", { class: "fd-muted fd-small", text: t("subjectHint") }),
       h("label", { for: "fd-message", text: t("message") }), message, error,
-      h("div", { class: "fd-actions" }, h("a", { class: "fd-btn fd-ghost", href: "#/", text: t("back") }), submit));
+      h("div", { class: "fd-actions" }, h("a", { class: "fd-btn fd-ghost", href: backHref(), text: t("back") }), submit));
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       const text = message.value.trim(), title = subject.value.trim();
@@ -364,7 +370,7 @@ export function mountFoyerdesk(root, options = {}) {
     const badgeSlot = h("span", { "data-testid": "topic-status" });
     const actionSlot = h("span", {});
     const notice = h("p", { class: "fd-error", role: "alert", "data-testid": "topic-error", hidden: true });
-    const list = h("ol", { class: "fd-messages", "aria-label": t("conversation") });
+    const list = h("ol", { class: "fd-messages", role: "log", "aria-live": "polite", "aria-relevant": "additions", "aria-label": t("messagesList") });
     const olderSlot = h("div", { class: "fd-older" });
     const scroller = h("div", { class: "fd-thread", role: "region", tabindex: "0", "aria-label": t("conversation"), "data-testid": "thread" }, olderSlot, list);
     const jump = h("button", { type: "button", class: "fd-jump", hidden: true, "data-testid": "new-message", text: t("newMessageBelow"), onclick: () => toBottom(true) });
@@ -374,10 +380,12 @@ export function mountFoyerdesk(root, options = {}) {
     box.addEventListener("input", () => saveDraft("reply-" + id, { message: box.value }));
     const send = h("button", { type: "submit", class: "fd-btn fd-primary", "data-testid": "send", text: t("send") });
     const status = h("p", { class: "fd-muted fd-small", role: "status", "data-testid": "sent", hidden: true });
-    const composer = h("form", { class: "fd-composer", novalidate: true }, box, h("div", { class: "fd-actions" }, status, send));
-    Object.assign(view, { title, badgeSlot, actionSlot, notice, list, olderSlot, scroller, jump, box, send, status, composer });
+    const hint = h("p", { class: "fd-muted fd-small", "data-testid": "composer-hint", id: "fd-reply-hint", hidden: true });
+    box.setAttribute("aria-describedby", "fd-reply-hint");
+    const composer = h("form", { class: "fd-composer", novalidate: true }, box, hint, h("div", { class: "fd-actions" }, status, send));
+    Object.assign(view, { title, badgeSlot, actionSlot, notice, list, olderSlot, scroller, jump, box, send, status, composer, hint });
     clear(main).append(h("div", { class: "fd-topic" },
-      h("div", { class: "fd-topic-head" }, h("a", { class: "fd-btn fd-ghost", href: "#/", text: t("back") }), title, badgeSlot, actionSlot),
+      h("div", { class: "fd-topic-head" }, h("a", { class: "fd-btn fd-ghost", href: backHref(), text: t("back") }), title, badgeSlot, actionSlot),
       notice, h("div", { class: "fd-thread-wrap" }, scroller, jump), composer));
     scroller.addEventListener("scroll", () => {
       view.atBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80;
@@ -401,6 +409,7 @@ export function mountFoyerdesk(root, options = {}) {
         if (box.value.trim() === text) { box.value = ""; saveDraft("reply-" + id, {}); } else saveDraft("reply-" + id, { message: box.value }); status.hidden = false; status.textContent = t("sent"); await pullTopic(view, true); loadRecent(); return; }
       notice.hidden = false; notice.textContent = errorText(res);
     });
+    box.addEventListener("input", () => { status.hidden = true; });
     box.addEventListener("keydown", (e) => { if ((e.ctrlKey || e.metaKey) && e.key === "Enter") composer.requestSubmit(); });
     loadTopic(view);
   }
@@ -408,7 +417,7 @@ export function mountFoyerdesk(root, options = {}) {
   function toBottom(smooth = false, markSeen = true) {
     const v = s.view; if (!v || v.kind !== "topic") return;
     // A hidden tab never finishes a smooth scroll, so the newest message would stay out of sight.
-    v.scroller.scrollTo({ top: v.scroller.scrollHeight, behavior: smooth && !document.hidden ? "smooth" : "auto" });
+    v.scroller.scrollTo({ top: v.scroller.scrollHeight, behavior: smooth && !document.hidden && !matchMedia("(prefers-reduced-motion: reduce)").matches ? "smooth" : "auto" });
     v.atBottom = true; if (markSeen) v.jump.hidden = true;
   }
 
@@ -416,6 +425,8 @@ export function mountFoyerdesk(root, options = {}) {
     if (data.topic) {
       view.topic = data.topic;
       view.title.textContent = data.topic.subject;
+      view.hint.hidden = false;
+      view.hint.textContent = String(data.topic.status).toLowerCase() === "resolved" ? t("reopenHint") + " " + t("ctrlEnterHint") : t("ctrlEnterHint");
       clear(view.badgeSlot).append(badge(data.topic.status));
       clear(view.actionSlot);
       const acts = data.topic.actions ?? [];
@@ -431,7 +442,7 @@ export function mountFoyerdesk(root, options = {}) {
     view.messages.forEach((m, i) => {
       const mine = m.direction === "visitor";
       const prev = view.messages[i - 1];
-      if (Number.isFinite(m.at) && (!Number.isFinite(prev?.at) || dayLabel(prev.at) !== dayLabel(m.at))) view.list.append(h("li", { role: "presentation", class: "fd-day", text: dayLabel(m.at) }));
+      if (Number.isFinite(m.at) && (!Number.isFinite(prev?.at) || dayLabel(prev.at) !== dayLabel(m.at))) view.list.append(h("li", { role: "separator", class: "fd-day", "aria-label": dayLabel(m.at), text: dayLabel(m.at) }));
       view.list.append(h("li", { class: "fd-msg " + (mine ? "fd-mine" : "fd-theirs"), "data-testid": "message" },
         h("span", { class: "fd-meta fd-small fd-muted", text: (mine ? t("you") : m.author ? t("teamNamed", { name: m.author }) : t("team")) + (Number.isFinite(m.at) ? " · " + when(m.at) : "") }),
         h("p", { class: "fd-bubble", text: m.text })));
