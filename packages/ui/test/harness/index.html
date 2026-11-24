@@ -5,5 +5,5 @@
 <script type="module">
   import { mountFoyerdesk } from "/src/foyerdesk.js";
   const lang = new URLSearchParams(location.search).get("lang") ?? undefined;
-  window.__fd = mountFoyerdesk(document.getElementById("app"), { lang, loginUrl: "/api/auth/login?returnTo=%2Ftalk" });
+  window.__fd = mountFoyerdesk(document.getElementById("app"), { lang, loginUrl: "/api/auth/login?returnTo=%2Ftalk", headingLevel: new URLSearchParams(location.search).get("level") === "2" ? 2 : 1 });
 </script></body></html>

@@ -44,6 +44,7 @@ export default {
   subjectHint: "If you leave it empty we use the first line of your question.",
   message: "Your question",
   messagePlaceholder: "Write your question…",
+  replyPlaceholder: "Write your reply…",
   create: "Send",
   creating: "Sending…",
   back: "Back",

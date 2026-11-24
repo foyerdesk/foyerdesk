@@ -13,7 +13,7 @@
   --fd-b-open-bg:#12305f; --fd-b-open:#93c5fd; --fd-b-res-bg:#123524; --fd-b-res:#86efac; --fd-b-pen-bg:#3b3010; --fd-b-pen:#fde68a; }
 .dark .fd a { color:#7cc0ff; } .dark .fd .fd-primary, .dark .fd .fd-ghost, .dark .fd .fd-recent-item { color:inherit; }
 .dark .fd .fd-primary { color:#fff !important; } .dark .fd .fd-ghost, .dark .fd .fd-recent-item, .dark .fd .fd-tab { color:var(--fd-text) !important; } .dark .fd .fd-tab { color:var(--fd-muted) !important; } .dark .fd .fd-active { color:var(--fd-text) !important; }
-.fd h1 { font-size:1.4rem; margin:0 0 .5rem; } .fd h2 { font-size:1.1rem; margin:0; } .fd h2.fd-small { font-size:13px; font-weight:600; text-transform:uppercase; letter-spacing:.04em; margin-bottom:2px; }
+.fd .fd-brand { font-size:1.4rem; font-weight:700; margin:0 0 .5rem; } .fd h2 { font-size:1.1rem; margin:0; } .fd h2.fd-small { font-size:13px; font-weight:600; text-transform:uppercase; letter-spacing:.04em; margin-bottom:2px; }
 .fd a { color:var(--fd-blue-dark); } .fd p { margin:0; }
 .fd-muted { color:var(--fd-muted); } .fd-small { font-size:13px; } .fd-strong { font-weight:600; } .fd-center { text-align:center; }
 .fd-error { color:var(--fd-err); background:var(--fd-err-bg); border:1px solid var(--fd-err-border); border-radius:var(--fd-radius); padding:8px 12px; margin:8px 0; }
@@ -22,9 +22,9 @@
 /* Sign-in card: DelvyG's .auth-card (white card, 12px radius, 420px, centred title and subtitle) */
 .fd-guest { display:flex; align-items:center; justify-content:center; padding:24px 16px; }
 .fd-auth-card { background:var(--fd-white); border:1px solid var(--fd-border); border-radius:12px; box-shadow:0 4px 6px rgba(0,0,0,.07),0 2px 4px rgba(0,0,0,.06); padding:40px; width:100%; max-width:420px; text-align:center; }
-.fd-auth-card h1 { font-size:22px; font-weight:700; margin:0 0 6px; } .fd-auth-card h2 { font-size:15px; font-weight:600; margin:18px 0 6px; }
+.fd-auth-card .fd-brand { font-size:22px; font-weight:700; margin:0 0 6px; } .fd-auth-card .fd-guest-title { font-size:15px; font-weight:600; margin:18px 0 6px; }
 .fd-auth-card .fd-btn { width:100%; margin-top:20px; }
-.fd-auth-card h2.fd-reason { font-size:20px; margin-top:8px; }
+.fd-auth-card .fd-guest-title.fd-reason { font-size:20px; margin-top:8px; }
 .fd-auth-card[data-reason="signedOut"]::before { content:"✓"; display:flex; align-items:center; justify-content:center; width:44px; height:44px; margin:0 auto 12px; border-radius:50%; background:var(--fd-b-res-bg); color:var(--fd-b-res); font-size:22px; font-weight:700; }
 .fd-btn { display:inline-flex; align-items:center; justify-content:center; gap:6px; min-height:40px; padding:8px 16px; border-radius:var(--fd-radius); border:1px solid transparent;
   font:inherit; font-weight:500; cursor:pointer; text-decoration:none; }
@@ -84,7 +84,8 @@
 .fd-composer { display:flex; flex-direction:column; gap:6px; }
 @media (max-width:1023px) {
   /* On a phone the open topic takes the screen; the slim island (name, way of signing in, Sign out) stays above it. */
-  .fd-shell[data-view="topic"] .fd-aside { display:none; }
+  .fd-table th:first-child, .fd-table td:first-child, .fd-table th:last-child, .fd-table td:last-child { display:none; } /* number and time: the subject, preview and status are what fits */
+  .fd-aside { display:none; } /* on a phone the list, the new-topic button and the account bar are enough; the side list would repeat them */
   .fd-shell[data-view="topic"] { padding-top:.5rem; gap:.25rem; }
   .fd-account .fd-avatar { width:32px; height:32px; font-size:13px; } .fd-account .fd-account-text .fd-muted { display:none; }
   .fd { --fd-top:6.25rem; }

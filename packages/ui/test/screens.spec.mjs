@@ -417,3 +417,37 @@ test("text typed while the side list is still loading is not wiped when the list
   await expect(page.getByTestId("recent-item")).toHaveCount(3); // the list arrived
   await expect(page.getByLabel("Your question")).toHaveValue("Half-written question");
 });
+
+test("headingLevel 2: the brand and the guest title step down, so a host page can keep its own single h1", async ({ page }) => {
+  await mockApi(page, { signedIn: false });
+  await page.goto("/?level=2");
+  await expect(page.getByTestId("sign-in-panel")).toBeVisible();
+  await expect(page.locator("h1")).toHaveCount(0);
+  await expect(page.locator("h2.fd-brand")).toHaveCount(1);
+  await expect(page.locator("h3.fd-guest-title")).toHaveCount(1);
+});
+
+test("the reply box says reply, the new-topic box says question", async ({ page }) => {
+  await mockApi(page, { topics: [row(1)], messages: { 1: [msg(1, "visitor", "Hi")] } });
+  await open(page, "/#/topic/1");
+  await expect(page.getByLabel("Reply", { exact: true })).toHaveAttribute("placeholder", "Write your reply…");
+});
+
+test("phone: the side list does not repeat the topic list; there is one New topic button on the list", async ({ page }, info) => {
+  test.skip(info.project.name !== "mobile", "phone width only");
+  await mockApi(page, { topics: many(4) });
+  await open(page);
+  await expect(page.getByTestId("topic-row")).toHaveCount(4);
+  await expect(page.getByTestId("recent-item").first()).toBeHidden();
+  await expect(page.getByRole("link", { name: "New topic" }).locator("visible=true")).toHaveCount(1);
+  await expect(page.getByTestId("account-card")).toBeVisible();
+});
+
+test("phone: the topic table fits the screen without sideways scrolling", async ({ page }, info) => {
+  test.skip(info.project.name !== "mobile", "phone width only");
+  await mockApi(page, { topics: many(3).map((t) => ({ ...t, subject: "A rather long subject line that has to wrap instead of pushing the table wider" })) });
+  await open(page);
+  await expect(page.getByTestId("topic-row")).toHaveCount(3);
+  expect(await page.locator(".fd-table-wrap").evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  await expect(page.getByTestId("topic-row").first()).toContainText("Open");
+});

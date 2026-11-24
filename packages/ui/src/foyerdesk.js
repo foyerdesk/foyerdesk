@@ -1,5 +1,5 @@
 // Foyerdesk screens. Call mountFoyerdesk(element, options). No framework; all text is added as text nodes.
-// options: { lang, apiBase, authBase, loginUrl, brand }
+// options: { lang, apiBase, authBase, loginUrl, brand, headingLevel }  (headingLevel: 1 by default; use 2 when the host page has its own h1)
 import { h, clear } from "./dom.js";
 import { createApi, newRequestId } from "./api.js";
 import { translator } from "./i18n/index.js";
@@ -27,6 +27,8 @@ export function mountFoyerdesk(root, options = {}) {
   const api = createApi(options.apiBase, options.authBase);
   const brand = options.brand ?? t("title");
   const loginUrl = options.loginUrl ?? "/api/auth/login?returnTo=" + encodeURIComponent(location.pathname);
+  const level = options.headingLevel === 2 ? 2 : 1;
+  const brandTag = "h" + level, titleTag = "h" + (level + 1);
   const baseTitle = document.title.replace(/^\(\d+\) /, "");
 
   const s = {
@@ -88,10 +90,10 @@ export function mountFoyerdesk(root, options = {}) {
     const key = { signedOut: "signedOut", expired: "expired", authError: "authError" }[s.reason];
     const title = key ? t(key + "Title") : t("guestTitle");
     const body = key ? t(key + "Body") : t("guestDefault");
-    const heading = h("h2", { tabindex: "-1", "data-testid": "guest-title", class: key ? "fd-reason" : "", text: title });
+    const heading = h(titleTag, { tabindex: "-1", "data-testid": "guest-title", class: "fd-guest-title" + (key ? " fd-reason" : ""), text: title });
     wrap.dataset.state = "guest";
     wrap.append(h("section", { class: "fd-guest", "data-testid": "sign-in-panel" },
-      h("div", { class: "fd-auth-card", "data-reason": key ?? "" }, h("h1", { text: brand }),
+      h("div", { class: "fd-auth-card", "data-reason": key ?? "" }, h(brandTag, { class: "fd-brand", text: brand }),
         key ? null : h("p", { class: "fd-muted", text: t("intro") }),
         heading, h("p", { role: "status", "data-testid": "guest-notice", class: "fd-muted", text: body }),
         h("a", { class: "fd-btn fd-primary", href: loginUrl, onclick: rememberTarget, text: key === "signedOut" ? t("signInAgain") : t("signIn") }))));
@@ -101,7 +103,7 @@ export function mountFoyerdesk(root, options = {}) {
   function renderPlain(text, testid) {
     clear(wrap);
     wrap.dataset.state = "guest";
-    wrap.append(h("section", { class: "fd-guest" }, h("div", { class: "fd-auth-card" }, h("h1", { text: brand }), h("p", { role: "status", class: "fd-muted", "data-testid": testid, text }))));
+    wrap.append(h("section", { class: "fd-guest" }, h("div", { class: "fd-auth-card" }, h(brandTag, { class: "fd-brand", text: brand }), h("p", { role: "status", class: "fd-muted", "data-testid": testid, text }))));
   }
 
   async function boot(quiet = false) {
@@ -129,8 +131,8 @@ export function mountFoyerdesk(root, options = {}) {
     recentBox = h("nav", { class: "fd-recent", "aria-label": t("recent") });
     badgeBox = h("div", { "aria-live": "polite" });
     // The account "island" (who is signed in, how, and Sign out) sits above everything and stays on screen while the page or the topic list scrolls.
-    const aside = h("aside", { class: "fd-aside" }, h("h1", { text: brand }), badgeBox,
-      h("a", { class: "fd-btn fd-primary fd-block", href: "#/new", "data-testid": "new-topic", text: t("newTopic") }), recentBox);
+    const aside = h("aside", { class: "fd-aside" }, h(brandTag, { class: "fd-brand", text: brand }), badgeBox,
+      h("a", { class: "fd-btn fd-primary fd-block", href: "#/new", "data-testid": "side-new-topic", text: t("newTopic") }), recentBox);
     const side = h("div", { class: "fd-side" }, asideCard, aside);
     main = h("main", { class: "fd-main" });
     shell = h("div", { class: "fd-shell" }, side, main);
@@ -207,7 +209,7 @@ export function mountFoyerdesk(root, options = {}) {
     const tabLink = (name, href, key) => h("a", { role: "tab", class: "fd-tab" + (tab === name ? " fd-active" : ""), "aria-selected": String(tab === name), href, "data-testid": "tab-" + name, text: t(key) });
     const tabs = h("div", { class: "fd-tabs", role: "tablist" }, tabLink("all", "#/", "tabAll"), tabLink("open", "#/open", "tabOpen"), tabLink("resolved", "#/resolved", "tabResolved"));
     const body = h("div", { "data-testid": "topic-list" });
-    clear(main).append(h("div", { class: "fd-page-head" }, h("h2", { text: t("topics") }), h("a", { class: "fd-btn fd-primary", href: "#/new", text: t("newTopic") })), tabs, body);
+    clear(main).append(h("div", { class: "fd-page-head" }, h("h2", { text: t("topics") }), h("a", { class: "fd-btn fd-primary", href: "#/new", "data-testid": "new-topic", text: t("newTopic") })), tabs, body);
     const res = await api.topics(tab, page);
     if (mine !== s.epoch || s.view !== view) return;
     if (res.status === 401) return endSession("expired");
@@ -281,7 +283,7 @@ export function mountFoyerdesk(root, options = {}) {
     const olderSlot = h("div", { class: "fd-older" });
     const scroller = h("div", { class: "fd-thread", role: "region", tabindex: "0", "aria-label": t("conversation"), "data-testid": "thread" }, olderSlot, list);
     const jump = h("button", { type: "button", class: "fd-jump", hidden: true, "data-testid": "new-message", text: t("newMessageBelow"), onclick: () => toBottom(true) });
-    const box = h("textarea", { id: "fd-reply", rows: "3", maxlength: "3000", "aria-label": t("reply"), placeholder: t("messagePlaceholder") });
+    const box = h("textarea", { id: "fd-reply", rows: "3", maxlength: "3000", "aria-label": t("reply"), placeholder: t("replyPlaceholder") });
     const send = h("button", { type: "submit", class: "fd-btn fd-primary", "data-testid": "send", text: t("send") });
     const status = h("p", { class: "fd-muted fd-small", role: "status", "data-testid": "sent", hidden: true });
     const composer = h("form", { class: "fd-composer", novalidate: true }, box, h("div", { class: "fd-actions" }, status, send));
