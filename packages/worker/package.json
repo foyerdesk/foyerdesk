@@ -8,7 +8,7 @@
   "scripts": {
     "build:test": "wrangler deploy --config wrangler.build.jsonc --dry-run --outdir .build",
     "test:unit": "node --test test/topics.test.mjs test/oidc.test.mjs test/config.test.mjs",
-    "test:acceptance": "npm run build:test && node test/acceptance.mjs .build/worker.js && node test/emaillink.mjs .build/worker.js",
+    "test:acceptance": "npm run build:test && node test/acceptance.mjs .build/worker.js && node test/emaillink.mjs .build/worker.js && node test/oidc-negative.mjs .build/worker.js",
     "test:live": "npm run build:test && node test/live-topics.mjs .build/worker.js"
   },
   "dependencies": { "jose": "5.10.0" },

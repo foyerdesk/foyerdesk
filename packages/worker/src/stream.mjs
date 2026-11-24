@@ -34,6 +34,13 @@ export class SupportStream extends DurableObject {
     return sent;
   }
 
+  // Sign-out: every open page of this contact is closed; a page that is still signed in reconnects with its own session.
+  async closeAll() {
+    for (const socket of this.ctx.getWebSockets()) {
+      try { socket.close(4401, "signed_out"); } catch { /* already closed */ }
+    }
+  }
+
   async webSocketMessage() { /* nothing is read from the page except the runtime-handled ping */ }
   async webSocketClose(socket, code) { try { socket.close(code === 1005 ? 1000 : code, "closed"); } catch { /* already closed */ } }
   async webSocketError(socket) { try { socket.close(1011, "error"); } catch { /* already closed */ } }

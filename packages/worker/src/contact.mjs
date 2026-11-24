@@ -67,7 +67,7 @@ export async function provisionContact(issuer, user, token) {
       headers: { ...headers, "Content-Type": "application/json" },
       body: JSON.stringify({
         inbox_id: inboxId, identifier, email,
-        name: typeof user.name === "string" && user.name.trim() ? user.name.trim() : defaultName,
+        name: cleanText(user.name, 120) || defaultName,
       }),
     });
   } catch {
@@ -131,8 +131,7 @@ async function syncProfile(contact, user, context, headers) {
   if (JSON.stringify(custom) !== JSON.stringify(contact.custom_attributes ?? {})) update.custom_attributes = custom;
   const realName = cleanText(user.name, 120);
   if (realName && (!contact.name || contact.name === placeholderName()) && realName !== contact.name) update.name = realName;
-  const picture = cleanText(user.picture, 500);
-  if (picture && /^https:\/\//.test(picture) && !contact.thumbnail && !contact.avatar_url) update.avatar_url = picture;
+  // The provider's picture is not copied: Chatwoot would download any address the provider is willing to give.
   if (!Object.keys(update).length) return;
   try {
     await fetch(base + "/" + contact.id, {
@@ -173,7 +172,7 @@ export async function provisionApiContact(identifier, user, token, inboxId, sour
     if (await hasCollision()) return null;
     await postAndReconcile("", {
       identifier, email,
-      name: typeof user.name === "string" && user.name.trim() ? user.name.trim() : defaultName,
+      name: cleanText(user.name, 120) || defaultName,
     }, headers);
     contact = await exact();
     if (!contact && await hasCollision()) return null;

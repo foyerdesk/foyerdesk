@@ -250,11 +250,17 @@ const send = (cookie, id, message, loseAck = false) => call(endpoint, { method: 
   ...(loseAck ? { "X-Foyerdesk-Test-Lose-Ack": "1" } : {}),
 }, body: JSON.stringify({ requestId: id, message }) });
 const checks = [];
+// A failed sign-in sends the browser back to the page with a code, never raw JSON, and never sets a session.
+function assertSignInError(response, code) {
+  assert.equal(response.status, 303);
+  assert.equal(new URL(response.headers.get("Location"), site).searchParams.get("auth_error"), code);
+  assert.equal(response.headers.getSetCookie().some((value) => value.startsWith("__Host-foyerdesk-session=") && !value.includes("Max-Age=0")), false);
+}
 
 try {
   assert.equal((await get("")).status, 401);
   verifiedEmail = false;
-  assert.equal((await login()).status, 403);
+  assertSignInError(await login(), "email_verification_required");
   verifiedEmail = true;
   const authorized = await login();
   assert.equal(authorized.status, 303, await authorized.clone().text());
@@ -264,8 +270,7 @@ try {
 
   tokenUser = "fixture-unrelated";
   const denied = await login();
-  assert.equal(denied.status, 403);
-  assert.equal(denied.headers.getSetCookie().some((value) => value.startsWith("__Host-foyerdesk-session=")), false);
+  assertSignInError(denied, "test_identity_required");
   tokenUser = owner;
   checks.push("A different Logto subject could not establish a support session");
   const directOf = async (query) => new URL((await call("/api/auth/login" + query)).headers.get("Location")).searchParams.get("direct_sign_in");
@@ -353,7 +358,7 @@ try {
   tokenUser = "email-collision";
   emailOverride = "first-user@example.invalid";
   const collision = await login();
-  assert.equal(collision.status, 409);
+  assertSignInError(collision, "explicit_contact_linking_required");
   assert.equal(contacts.length, 2);
   emailOverride = undefined;
   checks.push("Matching email for a different identity requires explicit linking and creates no contact");
@@ -406,6 +411,16 @@ try {
   one.socket.send("ping"); await settle();
   assert.equal(one.received.at(-1), "pong");
   checks.push("A signed team reply (or emailed reply) tells only that contact's open page; the other contact's page hears nothing; ping is answered");
+  // Signing out closes the live channel: a page signed out in another tab hears nothing more.
+  let closedWith;
+  one.socket.addEventListener("close", (event) => { closedWith = event.code; });
+  tokenUser = "first-user";
+  const secondSession = session(await login()); // same person, a second session
+  assert.equal((await call("/api/auth/logout", { method: "POST", headers: { Cookie: secondSession, Origin: site } })).status, 204);
+  await settle();
+  assert.equal(closedWith, 4401);
+  assert.deepEqual(two.received.filter((m) => m !== "pong"), []); // the other contact's channel is untouched
+  checks.push("Signing out closes the contact's open live channel; another contact's channel stays open");
   one.socket.close(); two.socket.close();
   contacts.push({ id: 900, email: "legacy@example.invalid", identifier: null, additional_attributes: { city: "Cairo", created_at_ip: "203.0.113.5" }, contact_inboxes: [{ inbox: { id: 2 }, source_id: "w" }] });
   const before = contacts.length;
@@ -477,9 +492,9 @@ try {
   assert.equal(rich.custom_attributes.last_source, "linkedin");
   assert.equal(rich.custom_attributes.login_provider, "linkedin");
   assert.equal(rich.custom_attributes.preferred_language, "en-US");
-  assert.equal(rich.avatar_url, "https://img.example.invalid/a.png");
+  assert.equal(rich.avatar_url, undefined); // the provider's picture address is never handed to Chatwoot to download
   assert.ok(sentScope.split(" ").includes("profile") && sentScope.split(" ").includes("identities"));
-  checks.push("Sign-in from ?src=linkedin stores source, provider, language, name and picture on the contact");
+  checks.push("Sign-in from ?src=linkedin stores source, provider, language and name on the contact (not the picture address)");
   assert.equal((await login("EG", "newsletter")).status, 303);
   assert.equal(rich.custom_attributes.first_source, "linkedin");
   assert.equal(rich.custom_attributes.last_source, "newsletter");

@@ -33,6 +33,17 @@ function result(status, data, reset = false) {
   return Response.json(data, { status, headers });
 }
 
+// A browser that comes back from the provider must never be left on raw JSON: send it to the page with a short code the
+// screens turn into "Sign-in could not be completed". The detail stays in the server log.
+function signInError(env, code, detail) {
+  if (detail) console.error("sign_in_failed", code, detail);
+  const headers = new Headers({ "Cache-Control": "no-store", "Referrer-Policy": "no-referrer",
+    Location: (returnPaths(env)[0] ?? "/") + "?auth_error=" + code });
+  headers.append("Set-Cookie", `${cookieName}=; ${cookieFlags}; Max-Age=0`);
+  headers.append("Set-Cookie", `${retryCookie}=; ${cookieFlags}; Max-Age=0`);
+  return new Response(null, { status: 303, headers });
+}
+
 async function login(request, env) {
   const oidc = oidcSettings(env);
   if (!oidc.clientSecret) return result(503, { error: "client_secret_unavailable" });
@@ -78,19 +89,18 @@ async function finishSignIn(request, env, { identifier, userInfo, transaction })
     if (!Number.isSafeInteger(inboxId) || inboxId < 1) throw new Error("invalid_inbox");
     try {
       mapping = await provisionApiContact(identifier, userInfo, env.CHATWOOT_APPLICATION_TOKEN, inboxId, env.CHATWOOT_CONTACT_SOURCE_KEY, {
-        country: request.cf?.country, source: transaction.source,
+        country: request.cf?.country, source: /^[a-z0-9_-]{1,32}$/.test(transaction.source ?? "") ? transaction.source : undefined,
         provider: Object.keys(userInfo.identities ?? {})[0] ?? "email",
       });
     } catch (error) {
-      console.error("contact_provisioning_failed", error instanceof Error ? error.message : "unknown");
-      return result(503, { error: "contact_provisioning_unavailable", reason: error instanceof Error ? error.message.slice(0, 80) : "unknown" }, true);
+      return signInError(env, "contact_provisioning_unavailable", error instanceof Error ? error.message : "unknown");
     }
-    if (!mapping) return result(409, { error: "explicit_contact_linking_required" }, true);
+    if (!mapping) return signInError(env, "explicit_contact_linking_required");
   } else {
     if (!env.FULL_PAGE_TEST_IDENTIFIER || identifier !== env.FULL_PAGE_TEST_IDENTIFIER) {
-      return result(403, { error: "test_identity_required" }, true);
+      return signInError(env, "test_identity_required");
     }
-    if (!env.FULL_PAGE_SOURCE_ID) return result(503, { error: "test_disabled" }, true);
+    if (!env.FULL_PAGE_SOURCE_ID) return signInError(env, "test_disabled");
     mapping = { contactId: 8, inboxId: 4, sourceId: env.FULL_PAGE_SOURCE_ID };
   }
   const sessionId = random();
@@ -139,10 +149,10 @@ async function callback(request, url, env) {
   }
   const code = url.searchParams.get("code");
   if (url.searchParams.has("error") || !code) {
-    return result(400, { error: "authorization_not_completed" }, true);
+    return signInError(env, "authorization_not_completed");
   }
   const oidc = oidcSettings(env);
-  if (!oidc.clientSecret) return result(503, { error: "client_secret_unavailable" }, true);
+  if (!oidc.clientSecret) return signInError(env, "client_secret_unavailable");
   try {
     const endpoints = await oidcEndpoints(oidc);
     const response = await fetch(endpoints.token, {
@@ -154,27 +164,27 @@ async function callback(request, url, env) {
         client_secret: oidc.clientSecret,
       }),
     });
-    if (!response.ok) return result(502, { error: "token_exchange_failed" }, true);
+    if (!response.ok) return signInError(env, "token_exchange_failed");
     const tokens = await response.json();
     const jwks = createRemoteJWKSet(new URL(endpoints.jwks));
     const { payload } = await jwtVerify(tokens.id_token, jwks, {
       issuer: oidc.issuer, audience: oidc.clientId, algorithms: signingAlgorithms,
       requiredClaims: ["sub", "exp", "iat", "nonce"],
     });
-    if (payload.nonce !== transaction.nonce) return result(400, { error: "invalid_nonce" }, true);
+    if (payload.nonce !== transaction.nonce) return signInError(env, "invalid_nonce");
 
     const userInfoResponse = await fetch(endpoints.userinfo, {
       headers: { Authorization: `Bearer ${tokens.access_token}` },
     });
-    if (!userInfoResponse.ok) return result(502, { error: "userinfo_failed" }, true);
+    if (!userInfoResponse.ok) return signInError(env, "userinfo_failed");
     const userInfo = await userInfoResponse.json();
-    if (userInfo.sub !== payload.sub) return result(400, { error: "userinfo_subject_mismatch" }, true);
+    if (userInfo.sub !== payload.sub) return signInError(env, "userinfo_subject_mismatch");
     const emailVerified = typeof userInfo.email === "string" && userInfo.email_verified === true;
     const identifier = await participantIdentifier(oidc.issuer, userInfo.sub);
-    if (!emailVerified) return result(403, { error: "email_verification_required" }, true);
+    if (!emailVerified) return signInError(env, "email_verification_required");
     return await finishSignIn(request, env, { identifier, userInfo, transaction });
-  } catch {
-    return result(502, { error: "oidc_validation_failed" }, true);
+  } catch (error) {
+    return signInError(env, "oidc_validation_failed", error instanceof Error ? error.message : "unknown");
   }
 }
 
@@ -310,7 +320,14 @@ async function messages(request, url, env) {
 async function logout(request, url, env) {
   if (request.headers.get("Origin") !== url.origin) return result(403, { error: "same_origin_required" });
   const sessionId = sessionIdFrom(request);
-  if (sessionId) await env.SUPPORT_SESSIONS.getByName(sessionId).revoke();
+  if (sessionId) {
+    const identity = await env.SUPPORT_SESSIONS.getByName(sessionId).read();
+    await env.SUPPORT_SESSIONS.getByName(sessionId).revoke();
+    // An open page keeps no live channel after sign-out.
+    if (identity?.mapping && env.SUPPORT_STREAM) {
+      try { await env.SUPPORT_STREAM.getByName(streamKey(identity.mapping)).closeAll(); } catch { /* the sockets end with the page */ }
+    }
+  }
   const headers = new Headers({ "Cache-Control": "no-store" });
   headers.append("Set-Cookie", `${sessionCookie}=; ${cookieFlags}; Max-Age=0`);
   headers.append("Set-Cookie", `${reauthCookie}=1; ${cookieFlags}; Max-Age=86400`);
@@ -322,6 +339,8 @@ const idPattern = /^[0-9]{1,12}$/;
 const requestIdPattern = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 
 async function topicsApi(request, url, env) {
+  // A write from another site is refused before anything else is looked at.
+  if (request.method === "POST" && request.headers.get("Origin") !== url.origin) return result(403, { error: "same_origin_required" });
   const sessionId = sessionIdFrom(request);
   const identity = sessionId ? await env.SUPPORT_SESSIONS.getByName(sessionId).read() : null;
   if (!identity || env.FULL_PAGE_INBOX_ID === undefined || identity.mapping.inboxId !== Number(env.FULL_PAGE_INBOX_ID)) {
@@ -420,8 +439,17 @@ async function stream(request, url, env) {
   return env.SUPPORT_STREAM.getByName(streamKey(identity.mapping)).fetch(request);
 }
 
-export default {
-  async fetch(request, env) {
+// Every answer, including the site's own files, carries the same baseline headers.
+function withBaseHeaders(response) {
+  if (response.status === 101 || response.webSocket) return response;
+  const wrapped = new Response(response.body, response);
+  wrapped.headers.set("X-Content-Type-Options", "nosniff");
+  if (!wrapped.headers.has("Referrer-Policy")) wrapped.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+  wrapped.headers.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  return wrapped;
+}
+
+async function handle(request, env) {
     configureChatwoot(env);
     const url = new URL(request.url);
     if (url.origin !== new URL(env.CALLBACK_URI).origin) return result(404, { error: "not_found" });
@@ -446,5 +474,6 @@ export default {
     } });
     if (env.SITE_ASSETS && !url.pathname.startsWith("/api/")) return env.SITE_ASSETS.fetch(request);
     return result(404, { error: "not_found" });
-  },
-};
+}
+
+export default { fetch: async (request, env) => withBaseHeaders(await handle(request, env)) };
