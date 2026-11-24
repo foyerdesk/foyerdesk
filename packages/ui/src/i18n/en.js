@@ -76,4 +76,11 @@ export default {
   err_too_many_open_topics: "You have 10 open topics. Please resolve one before starting another.",
   err_unconfirmed: "Delivery is unconfirmed. Your text is still here. Send again to check.",
   err_generic: "Something went wrong. Please try again.",
+  err_offline: "No connection. Your text is still here. Please try again.",
+  err_rate_limited: "Too many requests. Please wait a moment and try again.",
+  err_server: "The service is not available right now. Please try again in a minute.",
+  tryAgain: "Try again",
+  loading: "Loading…",
+  sending: "Sending…",
+  signingOut: "Signing out…",
 };

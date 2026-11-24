@@ -323,7 +323,11 @@ test("sign out from inside a topic: the address loses #/topic/<id>, the guest pa
 
 test("a link to a topic leads back to that topic after signing in", async ({ page }) => {
   const api = await mockApi(page, { signedIn: false, topics: [row(14, { subject: "Fourteen" })], messages: { 14: [msg(1, "visitor", "Hello from 14")] } });
-  await page.route("**/api/auth/login**", async (route) => { api.signedIn = true; await route.fulfill({ status: 302, headers: { Location: "/support" } }); });
+  // The visitor counts as signed in only when the page they are sent back to is requested (not already when the sign-in link is clicked),
+  // otherwise the old page's own re-check could see the new session first and use up the remembered topic.
+  let sentToSignIn = false;
+  await page.route("**/api/auth/login**", (route) => { sentToSignIn = true; return route.fulfill({ status: 302, headers: { Location: "/support" } }); });
+  page.on("request", (request) => { if (sentToSignIn && request.isNavigationRequest() && new URL(request.url()).pathname === "/support") api.signedIn = true; });
   await open(page, "/support#/topic/14");
   await expect(page.getByTestId("sign-in-panel")).toBeVisible();
   await page.getByRole("link", { name: "Sign in" }).click();
@@ -558,4 +562,164 @@ test("only one New topic button is visible on the list, on a wide screen and on 
   await expect(page.getByTestId("topic-row")).toHaveCount(2);
   const visible = await page.getByRole("link", { name: "New topic" }).evaluateAll((els) => els.filter((el) => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden").length);
   expect(visible).toBe(1);
+});
+
+// ---- from the independent review (ui_qa) ----
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+test("errors say what is wrong: no connection, too many requests, service down", async ({ page }) => {
+  await mockApi(page, { topics: [row(1)], messages: { 1: [msg(1, "visitor", "Hi")] } });
+  await open(page, "/#/topic/1");
+  await page.getByLabel("Reply", { exact: true }).fill("Keep me");
+  const cases = [[null, /No connection/], [429, /Too many requests/], [503, /not available right now/]];
+  for (const [status, text] of cases) {
+    await page.route("**/topics/1/messages", (route) => (route.request().method() === "POST" ? (status ? route.fulfill({ status, json: {} }) : route.abort()) : route.fallback()), { times: 1 });
+    await page.getByTestId("send").click();
+    await expect(page.locator(".fd-topic .fd-error, [role=alert]").filter({ hasText: text }).first()).toBeVisible();
+    await expect(page.getByLabel("Reply", { exact: true })).toHaveValue("Keep me");
+    await expect(page.getByTestId("send")).toBeEnabled();
+  }
+});
+
+test("words typed while a reply is on its way are not erased, and a second Ctrl+Enter does not send twice", async ({ page }) => {
+  const api = await mockApi(page, { topics: [row(1)], messages: { 1: [msg(1, "visitor", "Hi")] } });
+  await page.route("**/topics/1/messages", async (route) => { if (route.request().method() === "POST") await sleep(700); await route.fallback(); });
+  await open(page, "/#/topic/1");
+  const box = page.getByLabel("Reply", { exact: true });
+  await box.fill("First");
+  await box.press("Control+Enter");
+  await box.press("Control+Enter"); // a second press while the first is on its way
+  await expect(page.getByTestId("send")).toHaveText("Sending…");
+  await box.pressSequentially(" and more");
+  await expect(page.getByTestId("send")).toHaveText("Send message");
+  expect(api.posts.filter((p) => p.path.endsWith("/messages"))).toHaveLength(1);
+  await expect(box).toHaveValue("First and more");
+});
+
+test("sign out: an already ended session counts as signed out; a failure shows one message and can be retried", async ({ page }) => {
+  await mockApi(page, { topics: [row(1)] });
+  await open(page);
+  await page.route("**/api/auth/logout", (route) => route.fulfill({ status: 500, json: {} }));
+  for (let i = 0; i < 3; i++) await page.getByTestId("sign-out").click();
+  await expect(page.getByTestId("signout-error")).toHaveCount(1);
+  await expect(page.getByTestId("sign-out")).toBeEnabled();
+  await page.unroute("**/api/auth/logout");
+  await page.route("**/api/auth/logout", (route) => route.fulfill({ status: 401, json: {} }));
+  await page.getByTestId("sign-out").click();
+  await expect(page.getByTestId("guest-title")).toHaveText("You have signed out");
+});
+
+test("a failed list shows Try again, and Try again recovers it", async ({ page }) => {
+  await mockApi(page, { topics: [row(1)] });
+  let fail = true;
+  await page.route("**/api/support/topics?tab=all&page=1", (route) => (fail ? route.fulfill({ status: 500, json: {} }) : route.fallback()));
+  await open(page, "/#/");
+  await expect(page.getByTestId("list-error")).toContainText("not available right now");
+  fail = false;
+  await page.getByTestId("retry").first().click();
+  await expect(page.getByTestId("topic-row")).toHaveCount(1);
+});
+
+test("a topic that failed to load hides the reply box and offers Try again", async ({ page }) => {
+  await mockApi(page, { topics: [row(1)], messages: { 1: [msg(1, "visitor", "Hi")] } });
+  let fail = true;
+  await page.route("**/api/support/topics/1/messages", (route) => (fail && route.request().method() === "GET" ? route.fulfill({ status: 500, json: {} }) : route.fallback()));
+  await open(page, "/#/topic/1");
+  await expect(page.getByTestId("retry")).toBeVisible();
+  await expect(page.getByLabel("Reply", { exact: true })).toBeHidden();
+  fail = false;
+  await page.getByTestId("retry").click();
+  await expect(page.getByText("Hi", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Reply", { exact: true })).toBeVisible();
+});
+
+test("the list shows Loading while it waits, and no raw keys such as status_ or err_ are ever visible", async ({ page }) => {
+  await mockApi(page, { topics: [row(1, { status: "Snoozed" })] });
+  await page.route("**/api/support/topics?tab=all&page=1", async (route) => { await sleep(900); await route.fallback(); });
+  await open(page, "/#/");
+  await expect(page.getByTestId("loading")).toBeVisible();
+  await expect(page.getByTestId("topic-row")).toHaveCount(1);
+  const visible = await page.locator(".fd").innerText();
+  expect(visible).not.toMatch(/\bstatus_|\berr_/);
+});
+
+test("keyboard focus stays on the same item when the server pushes an update", async ({ page }) => {
+  const api = await mockApi(page, { topics: many(30) });
+  await open(page, "/#/");
+  await expect(page.getByTestId("topic-row")).toHaveCount(25);
+  await page.getByTestId("next").focus();
+  api.sockets[0].send("changed");
+  await page.waitForTimeout(600);
+  expect(await page.evaluate(() => document.activeElement?.getAttribute("data-testid"))).toBe("next");
+});
+
+test("an ended session while writing in a topic returns to that topic after 'Sign in again'", async ({ page }) => {
+  const api = await mockApi(page, { topics: [row(1)], messages: { 1: [msg(1, "visitor", "Hi")] } });
+  await open(page, "/#/topic/1");
+  await page.getByLabel("Reply", { exact: true }).fill("Do not lose me");
+  api.signedIn = false;
+  await page.getByTestId("send").click();
+  await expect(page.getByTestId("guest-title")).toHaveText("Your session ended");
+  await page.getByRole("link", { name: "Sign in" }).evaluate((a) => a.addEventListener("click", (e) => e.preventDefault(), { once: true })); // stay here, as the sign-in page would send the visitor back
+  await page.getByRole("link", { name: "Sign in" }).click();
+  api.signedIn = true;
+  await page.goto("/"); // the Worker returns the visitor to the page without the part after "#"
+  await expect(page.getByLabel("Reply", { exact: true })).toHaveValue("Do not lose me");
+  expect(new URL(page.url()).hash).toBe("#/topic/1");
+});
+
+for (const theme of ["light", "dark"]) {
+  test(`${theme} theme: text and buttons reach a contrast of 4.5 to 1`, async ({ page }) => {
+    await mockApi(page, { topics: [row(1, { unread: true }), row(2, { status: "Pending" }), row(3, { status: "Resolved", tab: "resolved" })], messages: { 1: [msg(1, "visitor", "Mine"), msg(2, "support", "Theirs")] } });
+    await open(page, "/#/");
+    if (theme === "dark") await page.evaluate(() => document.documentElement.classList.add("dark"));
+    await expect(page.getByTestId("topic-row")).toHaveCount(3);
+    const measure = () => page.evaluate(() => {
+      const parse = (c) => c.match(/[\d.]+/g).map(Number);
+      const lum = ([r, g, b]) => { const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }; return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
+      const backdrop = (el) => { // what the element sits on: layers with transparency are blended down to the first solid colour
+        const layers = []; for (let e = el; e; e = e.parentElement) { const c = parse(getComputedStyle(e).backgroundColor); if ((c[3] ?? 1) > 0) layers.push(c); if ((c[3] ?? 1) === 1) break; }
+        let base = [255, 255, 255]; if (!layers.length || (layers.at(-1)[3] ?? 1) < 1) base = parse(getComputedStyle(document.documentElement).colorScheme === "dark" ? "rgb(13,21,38)" : "rgb(255,255,255)");
+        for (const c of layers.reverse()) { const a = c[3] ?? 1; base = base.map((v, i) => v * (1 - a) + c[i] * a); }
+        return base;
+      };
+      const ratio = (el) => { const fg = parse(getComputedStyle(el).color), bg = backdrop(el); const a = fg[3] ?? 1; const mix = [0, 1, 2].map((i) => fg[i] * a + bg[i] * (1 - a)); const [x, y] = [lum(mix), lum(bg)]; return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
+      const pick = { "new-topic button": ".fd-page-head .fd-primary", "side New topic": '[data-testid="side-new-topic"]', "status badge Open": ".fd-badge.fd-open", "status badge Pending": ".fd-badge.fd-pending", "status badge Resolved": ".fd-badge.fd-resolved", "provider chip": ".fd-chip", "muted text": ".fd-muted", "topic link": ".fd-subject", "table text": ".fd-table td", "heading": ".fd h2" };
+      return Object.fromEntries(Object.entries(pick).map(([name, sel]) => { const el = document.querySelector(sel); return [name, el ? Math.round(ratio(el) * 100) / 100 : null]; }));
+    });
+    const result = await measure();
+    for (const [name, value] of Object.entries(result)) if (value !== null) expect(value, `${theme}: ${name}`).toBeGreaterThanOrEqual(4.5);
+  });
+}
+
+for (const [width, height] of [[390, 844], [767, 800], [768, 700], [900, 600], [1023, 640], [1024, 640], [1280, 573], [911, 512]]) {
+  test(`an open topic fits ${width} x ${height} below a heading of any height: reply box and Send stay in view`, async ({ page }, info) => {
+    test.skip(info.project.name !== "desktop", "sizes are set in the test");
+    await page.setViewportSize({ width, height });
+    const list = Array.from({ length: 60 }, (_, i) => msg(i + 1, i % 2 ? "support" : "visitor", `Message ${i + 1}`));
+    await mockApi(page, { topics: [row(1)], messages: { 1: list } });
+    await open(page, "/?spacer=130#/topic/1"); // 130 px stands in for the host's header and spacing above the screens
+    await expect(page.getByText("Message 60", { exact: true })).toBeVisible();
+    await page.waitForTimeout(200);
+    const send = await page.getByTestId("send").boundingBox();
+    expect(send.y + send.height, "Send is inside the window").toBeLessThanOrEqual(height);
+    expect(await page.getByTestId("thread").evaluate((el) => el.scrollHeight > el.clientHeight), "the thread scrolls inside").toBe(true);
+    const topEdge = await page.locator(".fd-topic").evaluate((el) => el.getBoundingClientRect().top + window.scrollY);
+    if (height - 120 - topEdge - 16 >= 256) { // there is room for a usable topic even with a phone keyboard open
+      await page.setViewportSize({ width, height: height - 120 });
+      await page.waitForTimeout(300);
+      const again = await page.getByTestId("send").boundingBox();
+      expect(again.y + again.height, "Send stays in view after the window shrinks").toBeLessThanOrEqual(height - 120);
+    }
+  });
+}
+
+test("while the session is being checked the panel says so and is not the guest panel; the screens add no second main landmark", async ({ page }) => {
+  await mockApi(page, { topics: [row(1)] });
+  await page.route("**/api/support/session", async (route) => { await sleep(800); await route.fallback(); });
+  await open(page, "/#/");
+  await expect(page.getByTestId("checking")).toBeVisible();
+  expect(await page.locator(".fd").getAttribute("data-state")).toBe("checking");
+  await expect(page.getByTestId("topic-row")).toHaveCount(1);
+  expect(await page.locator("main").count()).toBe(0);
 });

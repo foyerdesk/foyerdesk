@@ -1,6 +1,6 @@
 /* Foyerdesk screens. Colours and component shapes follow DelvyG/chatwoot-portal (blue accent, white cards, status badges).
    Override the variables on .fd to brand a site. */
-.fd { --fd-blue:#1f93ff; --fd-blue-dark:#1678d4; --fd-text:#1e293b; --fd-muted:#64748b; --fd-border:#e2e8f0; --fd-bg:#f8fafc; --fd-white:#fff;
+.fd { --fd-blue:#1f93ff; --fd-blue-dark:#1678d4; --fd-btn:#1d6fd6; --fd-btn-hover:#1558b0; --fd-chip-text:#1558b0; --fd-text:#1e293b; --fd-muted:#586579; --fd-border:#e2e8f0; --fd-bg:#f8fafc; --fd-white:#fff;
   --fd-red:#b91c1c; --fd-green:#22c55e; --fd-radius:8px; --fd-shadow:0 1px 3px rgba(0,0,0,.08),0 1px 2px rgba(0,0,0,.06);
   --fd-hover:#eef2f7; --fd-err-bg:#fef2f2; --fd-err-border:#fecaca; --fd-err:#b91c1c;
   --fd-b-open-bg:#dbeafe; --fd-b-open:#1d4ed8; --fd-b-res-bg:#dcfce7; --fd-b-res:#15803d; --fd-b-pen-bg:#fef9c3; --fd-b-pen:#a16207;
@@ -8,7 +8,7 @@
 .fd *,.fd *::before,.fd *::after { box-sizing:border-box; }
 .fd [hidden] { display:none !important; }
 /* Dark: the host page adds class "dark" on <html> (or sets data-theme="dark" on the element). */
-.dark .fd, .fd[data-theme="dark"] { --fd-text:#e5e7eb; --fd-muted:#9aa7b8; --fd-border:#26344a; --fd-bg:#0d1526; --fd-white:#131d31; --fd-blue:#3aa0ff; --fd-blue-dark:#2f86e0;
+.dark .fd, .fd[data-theme="dark"] { --fd-text:#e5e7eb; --fd-muted:#9aa7b8; --fd-border:#26344a; --fd-bg:#0d1526; --fd-white:#131d31; --fd-blue:#3aa0ff; --fd-btn:#2563eb; --fd-btn-hover:#1d4ed8; --fd-chip-text:#93c5fd; --fd-blue-dark:#2f86e0;
   --fd-hover:#1b2842; --fd-err-bg:#3a1417; --fd-err-border:#7f1d1d; --fd-err:#fca5a5; --fd-shadow:0 1px 3px rgba(0,0,0,.5);
   --fd-b-open-bg:#12305f; --fd-b-open:#93c5fd; --fd-b-res-bg:#123524; --fd-b-res:#86efac; --fd-b-pen-bg:#3b3010; --fd-b-pen:#fde68a; }
 .dark .fd a { color:#7cc0ff; } .dark .fd .fd-primary, .dark .fd .fd-ghost, .dark .fd .fd-recent-item { color:inherit; }
@@ -18,7 +18,7 @@
 .fd-muted { color:var(--fd-muted); } .fd-small { font-size:13px; } .fd-strong { font-weight:600; } .fd-center { text-align:center; }
 .fd-error { color:var(--fd-err); background:var(--fd-err-bg); border:1px solid var(--fd-err-border); border-radius:var(--fd-radius); padding:8px 12px; margin:8px 0; }
 .fd-card { background:var(--fd-white); border:1px solid var(--fd-border); border-radius:var(--fd-radius); box-shadow:var(--fd-shadow); padding:16px; }
-.fd[data-state="guest"] { background:transparent; }
+.fd[data-state="guest"], .fd[data-state="checking"] { background:transparent; }
 /* Sign-in card: DelvyG's .auth-card (white card, 12px radius, 420px, centred title and subtitle) */
 .fd-guest { display:flex; align-items:center; justify-content:center; padding:24px 16px; }
 .fd-auth-card { background:var(--fd-white); border:1px solid var(--fd-border); border-radius:12px; box-shadow:0 4px 6px rgba(0,0,0,.07),0 2px 4px rgba(0,0,0,.06); padding:40px; width:100%; max-width:420px; text-align:center; }
@@ -29,7 +29,7 @@
 .fd-btn { display:inline-flex; align-items:center; justify-content:center; gap:6px; min-height:40px; padding:8px 16px; border-radius:var(--fd-radius); border:1px solid transparent;
   font:inherit; font-weight:500; cursor:pointer; text-decoration:none; }
 .fd-btn:hover { text-decoration:none; } .fd-btn[disabled] { opacity:.5; cursor:default; }
-.fd-primary { background:var(--fd-blue); color:#fff !important; } .fd-primary:hover { background:var(--fd-blue-dark); }
+.fd-primary { background:var(--fd-btn); color:#fff !important; } .fd-primary:hover { background:var(--fd-btn-hover); }
 .fd-ghost { background:var(--fd-white); border-color:var(--fd-border); color:var(--fd-text) !important; }
 .fd-block { width:100%; }
 .fd-shell { display:grid; gap:1rem; grid-template-columns:1fr; max-width:72rem; margin:0 auto; padding:1rem; }
@@ -48,10 +48,10 @@
 }
 .fd-account-row { display:flex; gap:12px; align-items:center; } .fd-account-text { min-width:0; } .fd-account-text p { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .fd-avatar { width:44px; height:44px; border-radius:50%; flex:none; object-fit:cover; }
-.fd-initials { display:inline-flex; align-items:center; justify-content:center; background:var(--fd-blue-dark); color:#fff; font-weight:600; }
+.fd-initials { display:inline-flex; align-items:center; justify-content:center; background:var(--fd-btn); color:#fff; font-weight:600; }
 .fd-dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--fd-green); }
-.fd-chip { border:1px solid rgba(31,147,255,.4); background:rgba(31,147,255,.08); color:var(--fd-blue-dark); border-radius:6px; padding:1px 8px; font-size:12px; font-weight:500; white-space:nowrap; }
-.fd-unread { background:var(--fd-blue-dark); color:#fff; border-radius:var(--fd-radius); padding:8px 12px; font-weight:500; }
+.fd-chip { border:1px solid rgba(31,147,255,.4); background:rgba(31,147,255,.08); color:var(--fd-chip-text); border-radius:6px; padding:1px 8px; font-size:12px; font-weight:500; white-space:nowrap; }
+.fd-unread { background:var(--fd-btn); color:#fff; border-radius:var(--fd-radius); padding:8px 12px; font-weight:500; }
 .fd-unread-dot { display:inline-block; width:9px; height:9px; border-radius:50%; background:var(--fd-blue); margin-right:6px; flex:none; }
 .fd-recent { display:flex; flex-direction:column; gap:2px; }
 .fd-recent-item { display:flex; align-items:center; padding:6px 8px; border-radius:6px; color:var(--fd-text) !important; text-decoration:none; } .fd-recent-item:hover,.fd-current { background:var(--fd-hover); }
@@ -72,7 +72,7 @@
 .fd-form input:focus,.fd-form textarea:focus,.fd-composer textarea:focus,.fd-thread:focus-visible { outline:2px solid var(--fd-blue); outline-offset:1px; }
 .fd-actions { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-top:6px; }
 /* Topic: header, own scrolling thread, composer. The thread scrolls, so Sign out and the composer never move away. */
-.fd-topic { display:flex; flex-direction:column; gap:8px; height:calc(100dvh - var(--fd-top) - var(--fd-chrome, 0px)); min-height:22rem; } /* a host page sets --fd-chrome to the height of its own header */
+.fd-topic { display:flex; flex-direction:column; gap:8px; height:calc(100dvh - var(--fd-top) - var(--fd-chrome, 0px)); min-height:16rem; } /* a host page sets --fd-chrome to the height of its own header */
 .fd-topic-head { display:flex; align-items:center; gap:10px; flex-wrap:wrap; } .fd-topic-head h2 { flex:1; min-width:8rem; overflow-wrap:anywhere; }
 .fd-thread-wrap { position:relative; flex:1; min-height:0; background:var(--fd-white); border:1px solid var(--fd-border); border-radius:var(--fd-radius); }
 .fd-thread { height:100%; overflow-y:auto; padding:12px 16px; } .fd-messages { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:12px; }
@@ -80,8 +80,8 @@
 .fd-day { text-align:center; font-size:12px; color:var(--fd-muted); }
 .fd-msg { display:flex; flex-direction:column; max-width:85%; } .fd-mine { align-self:flex-end; align-items:flex-end; } .fd-theirs { align-self:flex-start; }
 .fd-bubble { white-space:pre-wrap; overflow-wrap:anywhere; border:1px solid var(--fd-border); border-radius:14px; padding:10px 14px; background:var(--fd-bg); }
-.fd-mine .fd-bubble { background:var(--fd-blue-dark); color:#fff; border-color:var(--fd-blue-dark); }
-.fd-jump { position:absolute; left:50%; bottom:12px; transform:translateX(-50%); border:0; border-radius:999px; background:var(--fd-blue-dark); color:#fff; padding:8px 16px; font-weight:500; cursor:pointer; box-shadow:var(--fd-shadow); }
+.fd-mine .fd-bubble { background:var(--fd-btn); color:#fff; border-color:var(--fd-btn); }
+.fd-jump { position:absolute; left:50%; bottom:12px; transform:translateX(-50%); border:0; border-radius:999px; background:var(--fd-btn); color:#fff; padding:8px 16px; font-weight:500; cursor:pointer; box-shadow:var(--fd-shadow); }
 .fd-composer { display:flex; flex-direction:column; gap:6px; }
 @media (max-width:1023px) {
   /* On a phone the open topic takes the screen; the slim island (name, way of signing in, Sign out) stays above it. */

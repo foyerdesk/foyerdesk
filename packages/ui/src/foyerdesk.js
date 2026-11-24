@@ -45,8 +45,10 @@ export function mountFoyerdesk(root, options = {}) {
   }
 
   // ---------- helpers ----------
-  const statusKey = (label) => "status_" + String(label).toLowerCase();
-  const badge = (label) => h("span", { class: `fd-badge fd-${String(label).toLowerCase()}`, text: t(statusKey(label)) });
+  const knownStatuses = new Set(["open", "pending", "resolved"]);
+  const statusName = (label) => (knownStatuses.has(String(label).toLowerCase()) ? String(label).toLowerCase() : "open");
+  const statusKey = (label) => "status_" + statusName(label);
+  const badge = (label) => h("span", { class: `fd-badge fd-${statusName(label)}`, text: t(statusKey(label)) });
   const when = (at) => {
     if (!Number.isFinite(at) || at <= 0) return "";
     const d = new Date(at * 1000), now = new Date();
@@ -58,7 +60,11 @@ export function mountFoyerdesk(root, options = {}) {
   const errorText = (res) => {
     const code = res.data?.error;
     const key = code ? "err_" + code : "";
-    return key && t(key) !== key ? t(key) : t("err_generic");
+    if (key && t(key) !== key) return t(key); // a reason the Worker named wins over the general texts below
+    if (res.status === 0) return t("err_offline");
+    if (res.status === 429) return t("err_rate_limited");
+    if (res.status >= 500) return t("err_server");
+    return t("err_generic");
   };
   const updateTitle = () => {
     const n = s.recent.topics.filter((x) => x.unread).length;
@@ -98,6 +104,7 @@ export function mountFoyerdesk(root, options = {}) {
 
   // ---------- session and guest ----------
   function endSession(reason) {
+    if (reason === "expired") rememberTarget(); // the address is cleared below; after signing in the visitor comes back to this topic
     s.epoch += 1;
     stopLive();
     s.signedIn = false; s.account = null; s.access = "guest"; s.reason = reason;
@@ -133,7 +140,7 @@ export function mountFoyerdesk(root, options = {}) {
 
   function renderPlain(text, testid) {
     clear(wrap);
-    wrap.dataset.state = "guest";
+    wrap.dataset.state = testid === "checking" ? "checking" : "guest"; // while the session is being checked the host must not show the guest texts
     wrap.append(h("section", { class: "fd-guest" }, h("div", { class: "fd-auth-card" }, h(brandTag, { class: "fd-brand", text: brand }), h("p", { role: "status", class: "fd-muted", "data-testid": testid, text }))));
   }
 
@@ -156,6 +163,17 @@ export function mountFoyerdesk(root, options = {}) {
     if (loaded && s.recent.total === 0 && s.route.name === "list" && !location.hash.replace("#", "")) location.replace("#/new");
   }
 
+  // Redraws (a push from the server, a page of the list) must not throw the keyboard focus away: the focused link or button is found again by what it is.
+  const focusKey = (el) => (el ? `${el.getAttribute("data-testid") ?? ""}|${el.getAttribute("href") ?? ""}|${el.textContent}` : null);
+  function keepFocus(container, redraw) {
+    const active = document.activeElement;
+    const key = active && container.contains(active) ? focusKey(active) : null;
+    redraw();
+    if (!key) return;
+    const again = [...container.querySelectorAll("a, button")].find((el) => focusKey(el) === key);
+    if (again) again.focus({ preventScroll: true });
+  }
+
   // ---------- shell ----------
   let asideCard, recentBox, badgeBox, main, shell;
   function buildShell() {
@@ -168,7 +186,7 @@ export function mountFoyerdesk(root, options = {}) {
     const aside = h("aside", { class: "fd-aside" }, h(brandTag, { class: "fd-brand", text: brand }), badgeBox,
       h("a", { class: "fd-btn fd-primary fd-block", href: "#/new", "data-testid": "side-new-topic", text: t("newTopic") }), recentBox);
     const side = h("div", { class: "fd-side" }, asideCard, aside);
-    main = h("main", { class: "fd-main" });
+    main = h("div", { class: "fd-main" });
     shell = h("div", { class: "fd-shell" }, side, main);
     wrap.append(shell);
     renderAccount(); renderRecent();
@@ -188,7 +206,8 @@ export function mountFoyerdesk(root, options = {}) {
       h("button", { type: "button", class: "fd-btn fd-ghost fd-signout", "data-testid": "sign-out", onclick: signOut, text: t("signOut") }));
   }
 
-  function renderRecent() {
+  function renderRecent() { keepFocus(recentBox, drawRecent); }
+  function drawRecent() {
     const unread = s.recent.topics.filter((x) => x.unread).length;
     clear(badgeBox);
     if (unread > 0) badgeBox.append(h("p", { class: "fd-unread", role: "status", "data-testid": "unread-badge", text: unread === 1 ? t("oneNewReply") : t("manyNewReplies", { n: unread }) }));
@@ -213,15 +232,34 @@ export function mountFoyerdesk(root, options = {}) {
     return false;
   }
 
+  let signingOut = false;
   async function signOut() {
+    if (signingOut) return;
+    signingOut = true;
+    const button = asideCard.querySelector('[data-testid="sign-out"]');
+    if (button) { button.disabled = true; button.textContent = t("signingOut"); }
+    asideCard.querySelector('[data-testid="signout-error"]')?.remove();
     const mine = s.epoch;
     const res = await api.logout();
+    signingOut = false;
     if (mine !== s.epoch) return;
-    if (res.status >= 200 && res.status < 300) { clearDrafts(); endSession("signedOut"); }
-    else main.prepend(h("p", { class: "fd-error", role: "alert", "data-testid": "signout-error", text: t("signOutFailed") }));
+    // 401, 403 and 404 mean the session is already gone: the visitor is signed out, which is what was asked for.
+    if ((res.status >= 200 && res.status < 300) || [401, 403, 404].includes(res.status)) { clearDrafts(); endSession("signedOut"); return; }
+    if (button) { button.disabled = false; button.textContent = t("signOut"); }
+    asideCard.append(h("p", { class: "fd-error fd-small", role: "alert", "data-testid": "signout-error", text: t("signOutFailed") }));
   }
 
   // ---------- routing ----------
+  // The open topic is as tall as the screen allows from where it starts (no guessed numbers for the host's header): its own thread scrolls, the reply box stays in view.
+  function fitTopic() {
+    const el = main && main.querySelector(".fd-topic");
+    if (!el) return;
+    el.style.height = "";
+    const top = el.getBoundingClientRect().top + window.scrollY;
+    el.style.height = Math.max(256, Math.round(window.innerHeight - top - 16)) + "px";
+  }
+  const fitSoon = () => { requestAnimationFrame(() => { fitTopic(); requestAnimationFrame(fitTopic); }); };
+
   function openRoute() {
     if (!s.signedIn) return;
     s.route = parseRoute();
@@ -232,9 +270,11 @@ export function mountFoyerdesk(root, options = {}) {
     else if (s.route.name === "topic") viewTopic(s.route.id);
     else viewList(s.route.tab, 1);
     renderRecent();
+    fitSoon();
   }
-  const listeners = [[window, "hashchange", openRoute]];
+  const listeners = [[window, "hashchange", openRoute], [window, "resize", fitSoon]];
   window.addEventListener("hashchange", openRoute);
+  window.addEventListener("resize", fitSoon);
 
   // ---------- list ----------
   async function viewList(tab, page) {
@@ -245,14 +285,20 @@ export function mountFoyerdesk(root, options = {}) {
     const tabs = h("div", { class: "fd-tabs", role: "tablist" }, tabLink("all", "#/", "tabAll"), tabLink("open", "#/open", "tabOpen"), tabLink("resolved", "#/resolved", "tabResolved"));
     const body = h("div", { "data-testid": "topic-list" });
     clear(main).append(h("div", { class: "fd-page-head" }, h("h2", { text: t("topics") }), h("a", { class: "fd-btn fd-primary", href: "#/new", "data-testid": "new-topic", text: t("newTopic") })), tabs, body);
+    body.append(h("p", { class: "fd-muted", role: "status", "data-testid": "loading", text: t("loading") }));
     const res = await api.topics(tab, page);
     if (mine !== s.epoch || s.view !== view) return;
     if (res.status === 401) return endSession("expired");
-    if (res.status !== 200) { body.append(h("p", { class: "fd-error", role: "alert", text: errorText(res) })); return; }
+    if (res.status !== 200) {
+      clear(body).append(h("div", { class: "fd-error", role: "alert", "data-testid": "list-error" }, h("p", { text: errorText(res) }),
+        h("button", { type: "button", class: "fd-btn fd-ghost", "data-testid": "retry", text: t("tryAgain"), onclick: () => viewList(tab, page) })));
+      return;
+    }
     renderList(body, res.data, tab, page, view);
   }
 
-  function renderList(body, data, tab, page, view) {
+  function renderList(body, data, tab, page, view) { keepFocus(body, () => drawList(body, data, tab, page, view)); }
+  function drawList(body, data, tab, page, view) {
     clear(body);
     if (!data.topics.length) {
       const key = { all: "emptyAll", open: "emptyOpen", resolved: "emptyResolved" }[tab];
@@ -340,16 +386,19 @@ export function mountFoyerdesk(root, options = {}) {
     composer.addEventListener("submit", async (event) => {
       event.preventDefault();
       const text = box.value.trim();
-      if (!text) return;
+      if (!text || view.sending) return; // a second Ctrl+Enter while sending must not send again
       if (!s.replyDraft || s.replyDraft.message !== text) s.replyDraft = { requestId: newRequestId(), message: text };
-      send.disabled = true; notice.hidden = true;
+      view.sending = true; send.disabled = true; send.textContent = t("sending"); notice.hidden = true;
       const mine = s.epoch;
       const res = await api.reply(id, { requestId: s.replyDraft.requestId, message: text });
       if (mine !== s.epoch || s.view !== view) return;
-      send.disabled = false;
+      view.sending = false; send.disabled = false; send.textContent = t("send");
       if (res.status === 401) return endSession("expired");
       if (res.status === 404) { notice.hidden = false; notice.textContent = t("topicNotFound"); return; }
-      if (res.status === 200) { s.replyDraft = null; box.value = ""; saveDraft("reply-" + id, {}); status.hidden = false; status.textContent = t("sent"); await pullTopic(view, true); loadRecent(); return; }
+      if (res.status === 200) {
+        s.replyDraft = null;
+        // Only what was sent is removed: words typed while the answer was on its way stay.
+        if (box.value.trim() === text) { box.value = ""; saveDraft("reply-" + id, {}); } else saveDraft("reply-" + id, { message: box.value }); status.hidden = false; status.textContent = t("sent"); await pullTopic(view, true); loadRecent(); return; }
       notice.hidden = false; notice.textContent = errorText(res);
     });
     box.addEventListener("keydown", (e) => { if ((e.ctrlKey || e.metaKey) && e.key === "Enter") composer.requestSubmit(); });
@@ -400,7 +449,12 @@ export function mountFoyerdesk(root, options = {}) {
     if (mine !== s.epoch || s.view !== view) return;
     if (res.status === 401) return endSession("expired");
     if (res.status === 404) { view.notice.hidden = false; view.notice.textContent = t("topicNotFound"); view.composer.hidden = true; return; }
-    if (res.status !== 200) { view.notice.hidden = false; view.notice.textContent = errorText(res); return; }
+    if (res.status !== 200) {
+      view.notice.hidden = false; view.notice.textContent = errorText(res) + " "; view.composer.hidden = true;
+      view.notice.append(h("button", { type: "button", class: "fd-btn fd-ghost", "data-testid": "retry", text: t("tryAgain"), onclick: () => { view.notice.hidden = true; view.composer.hidden = false; loadTopic(view); } }));
+      return;
+    }
+    view.notice.hidden = true;
     view.messages = res.data.messages ?? []; view.hasMore = Boolean(res.data.hasMore);
     applyTopic(view, res.data); renderMessages(view); toBottom(false);
     view.lastId = view.messages.at(-1)?.id ?? 0;
