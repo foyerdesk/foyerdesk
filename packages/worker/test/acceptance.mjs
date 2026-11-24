@@ -346,10 +346,34 @@ try {
   const expiring = session(await login());
   assert.equal((await get(expiring)).status, 200);
   await worker.dispose();
-  worker = runtime(16 * 60 * 1000);
+  worker = runtime(31 * 60 * 1000);
   assert.equal((await get(expiring)).status, 401);
   assert.equal((await send(expiring, randomUUID(), "Expired access")).status, 401);
-  checks.push("With the fixture clock advanced beyond the session lifetime, history and posting were denied");
+  checks.push("With the fixture clock advanced beyond the idle limit (30 minutes), history and posting were denied");
+  // Sliding session: activity keeps it alive, idleness ends it, and 8 hours is the absolute limit.
+  await worker.dispose();
+  worker = runtime();
+  const sliding = session(await login());
+  assert.equal((await get(sliding)).status, 200);
+  await worker.dispose();
+  worker = runtime(20 * 60 * 1000);
+  assert.equal((await get(sliding)).status, 200); // used after 20 minutes: extended to 50
+  await worker.dispose();
+  worker = runtime(45 * 60 * 1000);
+  assert.equal((await get(sliding)).status, 200); // alive at 45 minutes, which a fixed 30-minute session would not be
+  await worker.dispose();
+  worker = runtime(80 * 60 * 1000);
+  assert.equal((await get(sliding)).status, 401); // 35 minutes without any use: over
+  checks.push("A session that is used stays signed in beyond 30 minutes; 30 minutes without use ends it");
+  await worker.dispose();
+  worker = runtime();
+  const capped = session(await login());
+  const cappedStub = (await worker.getDurableObjectNamespace("SUPPORT_SESSIONS")).getByName(capped.split("=")[1].split(".")[0]);
+  const t0 = Date.now();
+  let at = t0;
+  for (let i = 0; i < 17; i += 1) { at += 29 * 60 * 1000; if (at - t0 < 8 * 3600 * 1000) assert.ok(await cappedStub.read(true, at), "alive at " + (at - t0)); }
+  assert.equal(await cappedStub.read(true, t0 + 8 * 3600 * 1000 + 1), null);
+  checks.push("Constant use cannot keep a session beyond 8 hours");
   await worker.dispose();
   multiUser = true;
   worker = runtime();
@@ -460,9 +484,9 @@ try {
   const lifetimeStream = (await worker.getDurableObjectNamespace("SUPPORT_STREAM")).getByName(`inbox-4-contact-${secondContact}`);
   assert.equal(await lifetimeStream.closeExpired(Date.now()), 0);
   assert.equal(await lifetimeStream.notify(), 1);
-  assert.equal(await lifetimeStream.closeExpired(Date.now() + 16 * 60 * 1000), 1);
+  assert.equal(await lifetimeStream.closeExpired(Date.now() + 31 * 60 * 1000), 1);
   assert.equal(await lifetimeStream.notify(), 0);
-  assert.equal(await lifetimeStream.closeExpired(Date.now() + 16 * 60 * 1000), 0);
+  assert.equal(await lifetimeStream.closeExpired(Date.now() + 31 * 60 * 1000), 0);
   checks.push("A live channel is closed once the session it was opened with has expired; before that it stays open");
   one.socket.close(); two.socket.close();
   contacts.push({ id: 900, email: "legacy@example.invalid", identifier: null, additional_attributes: { city: "Cairo", created_at_ip: "203.0.113.5" }, contact_inboxes: [{ inbox: { id: 2 }, source_id: "w" }] });

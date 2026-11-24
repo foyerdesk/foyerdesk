@@ -161,7 +161,7 @@ try {
     assert.equal(/Domain=/i.test(began.raw), false);
     const ok = await attempt();
     const sessionCookie = ok.headers.getSetCookie().find((c) => c.startsWith("__Host-foyerdesk-session="));
-    for (const flag of ["Secure", "HttpOnly", "SameSite=Lax", "Path=/", "Max-Age=900"]) assert.ok(sessionCookie.includes(flag), flag);
+    for (const flag of ["Secure", "HttpOnly", "SameSite=Lax", "Path=/", "Max-Age=28800"]) assert.ok(sessionCookie.includes(flag), flag);
     assert.equal(/Domain=/i.test(sessionCookie), false);
   });
   await check("no answer, header or redirect contains a secret", async () => {

@@ -1,6 +1,6 @@
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { configureChatwoot, participantIdentifier, provisionApiContact } from "./contact.mjs";
-import { sessionLifetime } from "./session.mjs";
+import { sessionMaxAge } from "./session.mjs";
 import { readLimited } from "./limits.mjs";
 import { EmailLinkStore, confirmPage, linkLifetimeSeconds, mailboxKey, networkKey, normalizeEmail, sendLink, sha256Hex, tokenPattern } from "./emaillink.mjs";
 import { oidcEndpoints, oidcSettings, providerTimeout, signingAlgorithms } from "./oidc.mjs";
@@ -114,7 +114,7 @@ async function finishSignIn(request, env, { identifier, userInfo, transaction })
   headers.append("Set-Cookie", `${cookieName}=; ${cookieFlags}; Max-Age=0`);
   headers.append("Set-Cookie", `${reauthCookie}=; ${cookieFlags}; Max-Age=0`);
   headers.append("Set-Cookie", `${retryCookie}=; ${cookieFlags}; Max-Age=0`);
-  headers.append("Set-Cookie", `${sessionCookie}=${await signedSession(env, sessionId)}; ${cookieFlags}; Max-Age=${sessionLifetime}`);
+  headers.append("Set-Cookie", `${sessionCookie}=${await signedSession(env, sessionId)}; ${cookieFlags}; Max-Age=${sessionMaxAge}`);
   return new Response(null, { status: 303, headers });
 }
 
@@ -385,7 +385,7 @@ async function topicsApi(request, url, env) {
   // A write from another site is refused before anything else is looked at.
   if (request.method === "POST" && request.headers.get("Origin") !== url.origin) return result(403, { error: "same_origin_required" });
   const sessionId = await sessionIdFrom(request, env);
-  const identity = sessionId ? await env.SUPPORT_SESSIONS.getByName(sessionId).read() : null;
+  const identity = sessionId ? await env.SUPPORT_SESSIONS.getByName(sessionId).read(false) : null;
   if (!identity || env.FULL_PAGE_INBOX_ID === undefined || identity.mapping.inboxId !== Number(env.FULL_PAGE_INBOX_ID)) {
     return result(401, { error: "sign_in_required" });
   }

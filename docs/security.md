@@ -9,7 +9,7 @@ How FoyerDesk is meant to protect customer conversations, and what is checked by
 | State-changing requests need the site's own `Origin` (a foreign and a missing one are both refused, checked before the session) | `worker.mjs` | `oidc-negative` (every POST route), acceptance |
 | Requests are idempotent: a retry with the same request id never creates a second topic or message | `thread.mjs` | acceptance |
 | Webhook accepted only with a valid Chatwoot HMAC signature and fresh timestamp; it carries no message text to the page | `stream.mjs` | acceptance |
-| Session cookie is `__Host-`, `Secure`, `HttpOnly`, `SameSite=Lax`, no `Domain`, 15 minutes; the session is revoked on sign-out | `worker.mjs`, `session.mjs` | `oidc-negative` (attributes), acceptance, screens |
+| Session cookie is `__Host-`, `Secure`, `HttpOnly`, `SameSite=Lax`, no `Domain`, cookie 8 hours; server limits 30 minutes idle and 8 hours absolute; the session is revoked on sign-out | `worker.mjs`, `session.mjs` | `oidc-negative` (attributes), acceptance, screens |
 | Messages are rendered as text, never as HTML | `packages/ui/src/dom.js` | screens (broken escaping was caught by a test) |
 | OpenID Connect: PKCE (S256 of the verifier that was sent), state, nonce, signature, algorithm allow-list (no `none`, no HS*), issuer, audience, expiry, same subject in token and userinfo, `email_verified` exactly `true` | `worker.mjs`, `oidc.mjs` | `oidc-negative` (one wrong thing per case, plus a control; the nonce check was removed once to confirm the test fails) |
 | Emailed link: hashed single-use token, confirm button, rate limits | `emaillink.mjs` | acceptance |

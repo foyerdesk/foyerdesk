@@ -33,7 +33,7 @@ Public repository whose history starts from a single commit (later work is ordin
 
 ## Planned features (not implemented)
 The comparison with the reference projects, with priorities, is in [REFERENCE_GAP.md](REFERENCE_GAP.md).
-0. Sliding session with an absolute cap (today fixed 15 minutes after sign-in).
+0. ~~Sliding session with an absolute cap~~ done: 30 minutes idle, 8 hours cap.
 1. Email field on the sign-in card for the emailed link.
 2. A mode for sites that already have their own users (the site signs a short token).
 3. Attachments, after server-side type and size checks and a security review.

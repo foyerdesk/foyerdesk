@@ -16,7 +16,7 @@ Rules: token is random, stored only as a hash, valid 15 minutes, single use; 3 l
 Status: tested with a fake mail service only. The built-in screen has no email field yet; a site that wants this must post to `/api/auth/email/start` itself.
 
 ## Sessions
-After sign-in the Worker stores the identity in a Durable Object and sets `__Host-foyerdesk-session` (`Secure`, `HttpOnly`, `SameSite=Lax`, path `/`). A session lasts 15 minutes and is revoked on sign-out (`POST /api/auth/logout`). Other cookies: `__Host-foyerdesk-oidc` (the sign-in in progress), `-oidc-retry`, `-reauth`.
+After sign-in the Worker stores the identity in a Durable Object and sets `__Host-foyerdesk-session` (`Secure`, `HttpOnly`, `SameSite=Lax`, path `/`). A session ends after 30 minutes without use and in any case 8 hours after sign-in (the cookie lives 8 hours, the idle limit is enforced on the server; an open page that only reconnects does not count as use). It is revoked on sign-out (`POST /api/auth/logout`). Other cookies: `__Host-foyerdesk-oidc` (the sign-in in progress), `-oidc-retry`, `-reauth`.
 
 ## Sign-in errors
 The visitor is sent back with `?auth_error=<code>`; the screens show "Sign-in could not be completed". Every failure after the provider returns uses this redirect; codes are `missing_transaction`, `invalid_transaction`, `authorization_not_completed`, `token_exchange_failed`, `oidc_validation_failed`, `invalid_nonce`, `userinfo_failed`, `userinfo_subject_mismatch`, `email_verification_required`, `explicit_contact_linking_required`, `contact_provisioning_unavailable`, `client_secret_unavailable`, `test_identity_required` and `test_disabled`. The internal reason is written to the server log only.

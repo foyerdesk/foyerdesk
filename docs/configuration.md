@@ -41,7 +41,7 @@ Settings are Cloudflare Worker **variables** (not secret, in the wrangler file) 
 `SUPPORT_SESSIONS`, `FULL_PAGE_THREAD`, `SUPPORT_STREAM` and `EMAIL_LINKS` are Durable Objects (classes `TestSupportSession`, `TestSupportThread`, `SupportStream`, `EmailLinkStore`; the first two keep a `Test` prefix because renaming needs a migration). `SITE_ASSETS` is an optional static assets binding.
 
 ## Fixed limits (in code)
-Session 15 minutes. Subject 3 to 120 characters, message up to 3000. At most 10 unresolved topics per customer. 25 topics a page, 20 messages a page. Emailed link valid 15 minutes, 3 links per address and 10 per IP in 10 minutes. After sign-in the visitor can only be sent back to a path listed in `RETURN_PATHS` (default `/support`); a failed sign-in is reported on the first one.
+Session: 30 minutes without use, 8 hours at most. Subject 3 to 120 characters, message up to 3000. At most 10 unresolved topics per customer. 25 topics a page, 20 messages a page. Emailed link valid 15 minutes, 3 links per address and 10 per IP in 10 minutes. After sign-in the visitor can only be sent back to a path listed in `RETURN_PATHS` (default `/support`); a failed sign-in is reported on the first one.
 
 ## Screens
 `mountFoyerdesk(element, { lang, apiBase, authBase, loginUrl, brand })`. Languages: add `packages/ui/src/i18n/<code>.js` next to `en.js`, register it in `i18n/index.js`; a test fails when a key is missing or extra. Only English exists today.

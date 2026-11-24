@@ -18,7 +18,7 @@ One site is one Chatwoot account and one Worker deployment. The customer never c
 - **OpenID Connect**: authorization code with PKCE, the ID token is checked against the provider's JWKS (issuer, audience, nonce, signing algorithm from an allow-list), endpoints come from the discovery document. A verified email is required.
 - **Emailed link** (optional, no provider needed): a random token, stored hashed for 15 minutes, usable once; the link opens a page with a button so mail scanners cannot use it up; three links per address and ten per IP in ten minutes; the answer is the same for every address.
 - Either way the result is a *contact identifier* (a hash of issuer and subject, with a configurable prefix). The Worker finds or creates the Chatwoot contact for it and links it to the site's inbox. An email that already belongs to a different identifier is never merged silently.
-- The browser only holds an opaque session cookie (`__Host-`, `HttpOnly`, `Secure`, `SameSite=Lax`). The session lives 15 minutes in a Durable Object and is revoked on sign-out.
+- The browser only holds an opaque session cookie (`__Host-`, `HttpOnly`, `Secure`, `SameSite=Lax`). The session lives in a Durable Object: 30 minutes without use, 8 hours at most and is revoked on sign-out.
 
 ## Topics
 One topic is one Chatwoot conversation. The Worker lists them with Chatwoot's paged filter endpoint (the per-contact list endpoint stops at 25 conversations). Statuses shown to the customer: Open, Pending, Resolved. Writing into a Resolved topic reopens it; the customer can mark a topic solved. At most ten topics may be open at once.
