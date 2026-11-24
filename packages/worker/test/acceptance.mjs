@@ -90,6 +90,7 @@ async function upstream(request) {
       return Response.json({ payload: hit.slice((page - 1) * 25, page * 25).map(detail), meta: { all_count: hit.length } });
     }
     if (request.method === "POST" && path === "/conversations") {
+      if (topicFault === "contact_deleted") return new Response(null, { status: 404 });
       const data = await request.json();
       assert.equal(data.message.message_type, "incoming");
       if (topicFault === "create_committed_then_lost") {
@@ -126,7 +127,10 @@ async function upstream(request) {
   if (multiUser) {
     if (request.method === "GET" && path === "/contacts/search") {
       const key = url.searchParams.get("q");
-      return Response.json({ payload: contacts.filter((row) => row.identifier === key || row.email === key) });
+      // Like Chatwoot: part of an email matches, 15 rows a page.
+      const all = contacts.filter((row) => row.identifier === key || (row.email ?? "").includes(key));
+      const page = Number(url.searchParams.get("page") ?? 1);
+      return Response.json({ payload: all.slice((page - 1) * 15, page * 15) });
     }
     if (request.method === "POST" && path === "/contacts") {
       const data = await request.json();
@@ -218,7 +222,7 @@ function runtime(clockOffset = 0) {
     bindings: {
       LOGTO_ISSUER: issuer, LOGTO_CLIENT_ID: clientId, LOGTO_CLIENT_SECRET: "synthetic-secret",
       CHATWOOT_BASE_URL: "https://chat.example.invalid", CHATWOOT_ACCOUNT_ID: "1", IDENTIFIER_PREFIX: "acme-", DEFAULT_CONTACT_NAME: "Customer", RETURN_PATHS: "/talk,/support", CALLBACK_URI: site + "/api/auth/callback", CHATWOOT_APPLICATION_TOKEN: "synthetic-chatwoot-token", CHATWOOT_WEBHOOK_SECRET: "synthetic-webhook-secret",
-      FULL_PAGE_TEST_IDENTIFIER: identifier, FULL_PAGE_SOURCE_ID: "synthetic-source",
+      FOYERDESK_TEST_MODE: "1", LEGACY_MESSAGES: "1", FULL_PAGE_TEST_IDENTIFIER: identifier, FULL_PAGE_SOURCE_ID: "synthetic-source",
       ...(multiUser ? { FULL_PAGE_INBOX_ID: "4", CHATWOOT_CONTACT_SOURCE_KEY: "fixture-source-key", CHATWOOT_INBOX_IDENTIFIER: "inbox-identifier" } : {}),
     },
   }));
@@ -362,6 +366,35 @@ try {
   assert.equal(contacts.length, 2);
   emailOverride = undefined;
   checks.push("Matching email for a different identity requires explicit linking and creates no contact");
+
+  // The same person with a new verified address keeps the contact; an address that belongs to another contact is never taken.
+  tokenUser = "first-user";
+  emailOverride = "first-user-new@example.invalid";
+  assert.equal((await login()).status, 303);
+  assert.equal(contacts.length, 2);
+  assert.equal(contacts.find((row) => row.identifier.endsWith(createHash("sha256").update(JSON.stringify([issuer, "first-user"])).digest("hex"))).email, "first-user-new@example.invalid");
+  tokenUser = "second-user";
+  emailOverride = "first-user-new@example.invalid";
+  assertSignInError(await login(), "explicit_contact_linking_required");
+  emailOverride = undefined;
+  tokenUser = "first-user";
+  emailOverride = "first-user@example.invalid"; // back to the original for the tests that follow
+  assert.equal((await login()).status, 303);
+  emailOverride = undefined;
+  checks.push("A person who changed the verified address at the provider keeps their contact (the address follows); an address owned by another contact is refused");
+
+  // Searching reads past the first 15 rows, so an existing contact behind similar addresses is still found and merged, not duplicated.
+  for (let i = 0; i < 16; i += 1) contacts.push({ id: 700 + i, email: `x${i}target@example.invalid`, identifier: `other-${i}`, contact_inboxes: [] });
+  contacts.push({ id: 750, email: "target@example.invalid", identifier: null, contact_inboxes: [] });
+  const countBefore = contacts.length;
+  tokenUser = "page-owner";
+  emailOverride = "target@example.invalid";
+  assert.equal((await login()).status, 303);
+  assert.equal(contacts.length, countBefore);
+  assert.ok(contacts.find((row) => row.id === 750).identifier.startsWith("acme-"));
+  emailOverride = undefined;
+  contacts.splice(countBefore - 17, 17); // leave the fixture as the following tests expect it
+  checks.push("A contact whose address is on the second page of search results is found and merged instead of duplicated");
 
   // signed Chatwoot webhook -> "changed" over a WebSocket to the right contact only.
   const signed = (payload, { secret = "synthetic-webhook-secret", at = Math.floor(Date.now() / 1000), raw } = {}) => {
@@ -678,6 +711,23 @@ try {
   assert.deepEqual([p1.topics.length, p2.topics.length, p1.pages, p1.total], [25, 6, 2, 31]);
   assert.equal(new Set([...p1.topics, ...p2.topics].map((t) => t.id)).size, 31);
   checks.push("A customer with more than 25 topics reaches all of them page by page (the Chatwoot per-contact list cap is avoided)");
+  // A contact deleted in Chatwoot: starting a topic ends the session instead of failing forever.
+  tokenUser = "gone-user";
+  const goneCookie = session(await login());
+  topicFault = "contact_deleted";
+  assert.equal((await post(goneCookie, "", { requestId: randomUUID(), message: "Anyone there?" })).status, 401);
+  topicFault = "none";
+  assert.equal((await api(goneCookie, "")).status, 401);
+  checks.push("When Chatwoot reports the contact gone while a topic is started, the session is ended");
+  // The idempotency records are kept 48 hours, then removed: nothing grows without limit.
+  const ledgerKey = JSON.stringify([contacts.find((row) => row.id === contactA).identifier, 4]);
+  await worker.dispose();
+  worker = runtime();
+  assert.equal(await (await worker.getDurableObjectNamespace("FULL_PAGE_THREAD")).getByName(ledgerKey).purge(), 0);
+  await worker.dispose();
+  worker = runtime(49 * 3600 * 1000);
+  assert.ok(await (await worker.getDurableObjectNamespace("FULL_PAGE_THREAD")).getByName(ledgerKey).purge() > 0);
+  checks.push("Request records are kept for 48 hours and then purged (none removed at once, all old ones removed after 49 hours)");
   topicMode = false;
   console.log(JSON.stringify({ status: "PASS", scope: "Local Worker runtime with simulated upstream Logto and Chatwoot", checks }, null, 2));
 } finally {

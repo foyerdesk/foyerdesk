@@ -3,6 +3,8 @@
 // provider's discovery document. Logto extras (direct provider links, the identities claim) apply only when
 // OIDC_FLAVOR=logto. The older LOGTO_* names keep working and select the Logto layout without a discovery request.
 const discovered = new Map();
+const discoveryTtl = 3600 * 1000;
+export const providerTimeout = 8000; // every call to the provider
 
 export const signingAlgorithms = ["ES256", "ES384", "RS256", "PS256", "EdDSA"];
 
@@ -22,15 +24,16 @@ export async function oidcEndpoints(settings) {
   if (settings.legacy) {
     return { authorization: issuer + "/auth", token: issuer + "/token", jwks: issuer + "/jwks", userinfo: issuer + "/me" };
   }
-  if (!discovered.has(issuer)) {
-    const response = await fetch(issuer.replace(/\/$/, "") + "/.well-known/openid-configuration");
-    if (!response.ok) throw new Error("discovery_failed");
-    const document = await response.json();
-    if (document.issuer !== issuer) throw new Error("discovery_issuer_mismatch");
-    discovered.set(issuer, {
-      authorization: document.authorization_endpoint, token: document.token_endpoint,
-      jwks: document.jwks_uri, userinfo: document.userinfo_endpoint,
-    });
+  const cached = discovered.get(issuer);
+  if (cached && Date.now() - cached.at < discoveryTtl) return cached.endpoints;
+  const response = await fetch(issuer.replace(/\/$/, "") + "/.well-known/openid-configuration", { signal: AbortSignal.timeout(providerTimeout) });
+  if (!response.ok) throw new Error("discovery_failed");
+  const document = await response.json();
+  if (document.issuer !== issuer) throw new Error("discovery_issuer_mismatch");
+  const endpoints = { authorization: document.authorization_endpoint, token: document.token_endpoint, jwks: document.jwks_uri, userinfo: document.userinfo_endpoint };
+  for (const [name, value] of Object.entries(endpoints)) {
+    if (typeof value !== "string" || !value.startsWith("https://")) throw new Error("discovery_endpoint_not_https_" + name);
   }
-  return discovered.get(issuer);
+  discovered.set(issuer, { at: Date.now(), endpoints });
+  return endpoints;
 }

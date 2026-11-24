@@ -27,14 +27,21 @@ export async function participantIdentifier(issuer, subject) {
   return identifierPrefix + hex;
 }
 
+// Chatwoot answers 15 rows a page; read on until a short page (at most 5 pages), so a match is not missed behind similar addresses.
 async function search(query, headers) {
-  const url = new URL(base + "/search");
-  url.searchParams.set("q", query);
-  const response = await fetch(url, { headers, signal: AbortSignal.timeout(5000) });
-  if (!response.ok) throw new Error("contact_search_failed_" + response.status);
-  const { payload } = await response.json();
-  if (!Array.isArray(payload)) throw new Error("invalid_contact_search_response");
-  return payload;
+  const rows = [];
+  for (let page = 1; page <= 5; page += 1) {
+    const url = new URL(base + "/search");
+    url.searchParams.set("q", query);
+    if (page > 1) url.searchParams.set("page", String(page));
+    const response = await fetch(url, { headers, signal: AbortSignal.timeout(5000) });
+    if (!response.ok) throw new Error("contact_search_failed_" + response.status);
+    const { payload } = await response.json();
+    if (!Array.isArray(payload)) throw new Error("invalid_contact_search_response");
+    rows.push(...payload);
+    if (payload.length < 15) break;
+  }
+  return rows;
 }
 
 function confirmedContact(contact) {
@@ -178,7 +185,16 @@ export async function provisionApiContact(identifier, user, token, inboxId, sour
     if (!contact && await hasCollision()) return null;
   }
   if (!contact) throw new Error("contact_provisioning_unconfirmed_write_" + lastWriteStatus.value);
-  if (contact.email?.toLowerCase() !== email.toLowerCase()) return null;
+  if (contact.email?.toLowerCase() !== email.toLowerCase()) {
+    // The same person (same provider subject) now has another verified address. Follow it, unless a different contact owns that address.
+    const taken = (await search(email, headers)).some((row) => row.id !== contact.id && row.email?.trim().toLowerCase() === email.toLowerCase());
+    if (taken) return null;
+    try {
+      await fetch(base + "/" + contact.id, { method: "PUT", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify({ email }), signal: AbortSignal.timeout(5000) });
+    } catch { /* read back below */ }
+    contact = await exact();
+    if (contact?.email?.toLowerCase() !== email.toLowerCase()) throw new Error("contact_email_update_unconfirmed");
+  }
   await syncProfile(contact, user, context, headers);
 
   const findMapping = (row) => {

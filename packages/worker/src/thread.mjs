@@ -14,6 +14,30 @@ export class TestSupportThread extends DurableObject {
     if (env.REQUEST_MARKER) requestMarker = String(env.REQUEST_MARKER);
   }
 
+  // Request records (the idempotency ledger) are kept 48 hours, then removed by a daily alarm. A retry later than that is a new request.
+  async remember() {
+    if ((await this.ctx.storage.getAlarm()) === null) await this.ctx.storage.setAlarm(Date.now() + 24 * 3600 * 1000);
+  }
+
+  // Removes request records older than 48 hours; returns how many. Called by the daily alarm.
+  async purge() {
+    const cutoff = Date.now() - 48 * 3600 * 1000;
+    let removed = 0;
+    for (const prefix of ["request:", "topic-request:"]) {
+      const rows = await this.ctx.storage.list({ prefix });
+      const old = [...rows].filter(([, value]) => !(value?.at > cutoff)).map(([key]) => key);
+      if (old.length) await this.ctx.storage.delete(old);
+      removed += old.length;
+    }
+    return removed;
+  }
+
+  async alarm() {
+    await this.purge();
+    const left = (await this.ctx.storage.list({ prefix: "request:" })).size + (await this.ctx.storage.list({ prefix: "topic-request:" })).size;
+    if (left) await this.ctx.storage.setAlarm(Date.now() + 24 * 3600 * 1000);
+  }
+
   // At most `writeLimit` writes a minute per customer. Kept in memory on purpose: it costs no storage write, and a restarted object only forgets the last minute.
   tooMany() {
     const now = Date.now();
@@ -32,6 +56,7 @@ export class TestSupportThread extends DurableObject {
     });
     if (response.status === 404 && path.startsWith("/contacts/")) throw new Error("contact_gone");
     if (response.status === 404 && path.startsWith("/conversations/")) throw new Error("topic_not_found");
+    if (response.status === 404 && path === "/conversations") throw new Error("contact_gone"); // the contact or its inbox link was deleted
     if (!response.ok) throw new Error("chatwoot_request_failed");
     return response.json();
   }
@@ -111,18 +136,19 @@ export class TestSupportThread extends DurableObject {
   // The customer is reading the reply on the page: tell Chatwoot, so it does not send the reply by email.
   async markSeen(mapping, last) {
     const identifier = this.env.CHATWOOT_INBOX_IDENTIFIER;
-    if (!identifier || (await this.ctx.storage.get("seen") ?? 0) >= last.id) return;
+    const seenKey = "seen:" + last.conversation_id;
+    if (!identifier || (await this.ctx.storage.get(seenKey) ?? 0) >= last.id) return;
     try {
       const response = await fetch(
         `${chatwootOrigin(this.env)}/public/api/v1/inboxes/${identifier}/contacts/${mapping.sourceId}` +
         `/conversations/${last.conversation_id}/update_last_seen`,
         { method: "POST", signal: AbortSignal.timeout(5000) });
-      if (response.ok) await this.ctx.storage.put("seen", last.id);
+      if (response.ok) await this.ctx.storage.put(seenKey, last.id);
     } catch { /* a missed mark only means an extra email */ }
   }
 
   async finish(requestId, digest) {
-    await this.ctx.storage.put({ ["request:" + requestId]: { digest, status: "accepted" }, pending: null });
+    await this.ctx.storage.put({ ["request:" + requestId]: { at: Date.now(), digest, status: "accepted" }, pending: null });
     return "accepted";
   }
 
@@ -165,6 +191,7 @@ export class TestSupportThread extends DurableObject {
     if (valid.error) return { error: valid.error };
     const digest = await this.digestOf("create", valid.subject, valid.message);
     return this.ctx.blockConcurrencyWhile(async () => {
+      await this.remember();
       const key = "topic-request:" + requestId;
       const seen = await this.ctx.storage.get(key);
       if (seen && seen.digest !== digest) return { error: "conflict" };
@@ -172,19 +199,19 @@ export class TestSupportThread extends DurableObject {
       if (seen) { // answer lost last time: find the topic the first attempt created before anything is written again
         const found = (await this.api(`/conversations/filter?page=1`, { payload: topics.listFilter(mapping, "open") })).payload
           ?.find((row) => row.custom_attributes?.request_id === requestId && topics.ownedTopic(row, mapping));
-        if (found) { await this.ctx.storage.put(key, { digest, conversationId: found.id }); return { id: found.id, repeated: true }; }
+        if (found) { await this.ctx.storage.put(key, { at: Date.now(), digest, conversationId: found.id }); return { id: found.id, repeated: true }; }
       } else {
         const open = await this.api(`/conversations/filter?page=1`, { payload: topics.listFilter(mapping, "open") });
         if ((open.meta?.all_count ?? 0) >= topics.MAX_ACTIVE_TOPICS) return { error: "too_many_open_topics" };
-        await this.ctx.storage.put(key, { digest, conversationId: null });
+        await this.ctx.storage.put(key, { at: Date.now(), digest, conversationId: null });
       }
       let created;
       try {
         created = await this.api("/conversations", { inbox_id: mapping.inboxId, contact_id: mapping.contactId, source_id: mapping.sourceId,
           status: "open", custom_attributes: { subject: valid.subject, request_id: requestId },
           message: { content: valid.message, message_type: "incoming", private: false, content_attributes: { [requestMarker]: requestId } } });
-      } catch { return { error: "unconfirmed" }; }
-      await this.ctx.storage.put(key, { digest, conversationId: created.id });
+      } catch (error) { if (String(error?.message).includes("contact_gone")) throw error; return { error: "unconfirmed" }; }
+      await this.ctx.storage.put(key, { at: Date.now(), digest, conversationId: created.id });
       return { id: created.id };
     });
   }
@@ -197,6 +224,7 @@ export class TestSupportThread extends DurableObject {
     await this.ownedTopic(mapping, id);
     const digest = await this.digestOf("reply", id, message);
     return this.ctx.blockConcurrencyWhile(async () => {
+      await this.remember();
       const key = "topic-request:" + requestId;
       const seen = await this.ctx.storage.get(key);
       if (seen && seen.digest !== digest) return { error: "conflict" };
@@ -204,16 +232,16 @@ export class TestSupportThread extends DurableObject {
       if (seen) { // unknown outcome: read the topic back before writing again
         const raw = (await this.api(`/conversations/${id}/messages`)).payload;
         if (raw.some((m) => m.message_type === 0 && m.content_attributes?.[requestMarker] === requestId)) {
-          await this.ctx.storage.put(key, { digest, status: "accepted" });
+          await this.ctx.storage.put(key, { at: Date.now(), digest, status: "accepted" });
           return { accepted: true, repeated: true };
         }
       } else {
-        await this.ctx.storage.put(key, { digest, status: "pending" });
+        await this.ctx.storage.put(key, { at: Date.now(), digest, status: "pending" });
       }
       try {
         await this.api(`/conversations/${id}/messages`, { message_type: "incoming", content: message, private: false, content_attributes: { [requestMarker]: requestId } });
       } catch { return { error: "unconfirmed" }; }
-      await this.ctx.storage.put(key, { digest, status: "accepted" });
+      await this.ctx.storage.put(key, { at: Date.now(), digest, status: "accepted" });
       return { accepted: true };
     });
   }
@@ -238,6 +266,7 @@ export class TestSupportThread extends DurableObject {
       await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text))
     )).join(",");
     return this.ctx.blockConcurrencyWhile(async () => {
+      await this.remember();
       const existing = await this.ctx.storage.get("request:" + requestId);
       if (existing && existing.digest !== digest) return "conflict";
       if (existing?.status === "accepted") return "accepted";
@@ -251,7 +280,7 @@ export class TestSupportThread extends DurableObject {
         return found ? this.finish(requestId, digest) : "pending";
       }
 
-      await this.ctx.storage.put({ ["request:" + requestId]: { digest, status: "pending" }, pending: requestId });
+      await this.ctx.storage.put({ ["request:" + requestId]: { at: Date.now(), digest, status: "pending" }, pending: requestId });
       const message = { message_type: "incoming", content: text, private: false,
         content_attributes: { [requestMarker]: requestId } };
       try {

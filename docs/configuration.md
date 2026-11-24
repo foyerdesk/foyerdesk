@@ -7,7 +7,9 @@ Settings are Cloudflare Worker **variables** (not secret, in the wrangler file) 
 |---|---|---|---|
 | `CHATWOOT_BASE_URL` | variable | yes | `https://` address of Chatwoot, no trailing slash. No default |
 | `CHATWOOT_ACCOUNT_ID` | variable | yes | Numeric account id. No default |
-| `FULL_PAGE_INBOX_ID` | variable | yes | Numeric id of the API-channel inbox customers write into. When unset the Worker runs a built-in test mode that exists only for the acceptance tests |
+| `FULL_PAGE_INBOX_ID` | variable | yes | Numeric id of the API-channel inbox customers write into. When unset the Worker answers 503 `misconfigured` on every `/api/` route |
+| `FOYERDESK_TEST_MODE` | variable | no | `1` turns on the built-in test mode that exists only for the acceptance tests. Never set it in production |
+| `LEGACY_MESSAGES` | variable | no | `1` turns on the old single-thread route `/api/support/messages`. The screens use topics only; leave it unset |
 | `CHATWOOT_APPLICATION_TOKEN` | secret | yes | Access token of the integration user. Never reaches the browser |
 | `CHATWOOT_CONTACT_SOURCE_KEY` | secret | yes | Long random string used to derive each contact's inbox source id (HMAC). Changing it later orphans existing contacts |
 | `CHATWOOT_WEBHOOK_SECRET` | secret | yes | Signing secret of the Chatwoot webhook |

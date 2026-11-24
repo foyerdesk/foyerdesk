@@ -1,8 +1,9 @@
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { configureChatwoot, participantIdentifier, provisionApiContact } from "./contact.mjs";
 import { sessionLifetime } from "./session.mjs";
-import { EmailLinkStore, confirmPage, linkLifetimeSeconds, normalizeEmail, sendLink, sha256Hex, tokenPattern } from "./emaillink.mjs";
-import { oidcEndpoints, oidcSettings, signingAlgorithms } from "./oidc.mjs";
+import { readLimited } from "./limits.mjs";
+import { EmailLinkStore, confirmPage, linkLifetimeSeconds, mailboxKey, networkKey, normalizeEmail, sendLink, sha256Hex, tokenPattern } from "./emaillink.mjs";
+import { oidcEndpoints, oidcSettings, providerTimeout, signingAlgorithms } from "./oidc.mjs";
 import { html, script } from "./page.mjs";
 import { streamKey, streamTarget, verifyWebhook } from "./stream.mjs";
 import { parsePage, parseTab } from "./topics.mjs";
@@ -132,6 +133,7 @@ function restartOrFail(request, env, error) {
   return new Response(null, { status: 303, headers });
 }
 
+const keySets = new Map(); // the provider's keys are cached by the library between sign-ins
 async function callback(request, url, env) {
   let transaction;
   try {
@@ -163,10 +165,12 @@ async function callback(request, url, env) {
         code_verifier: transaction.verifier, client_id: oidc.clientId,
         client_secret: oidc.clientSecret,
       }),
+      signal: AbortSignal.timeout(providerTimeout),
     });
     if (!response.ok) return signInError(env, "token_exchange_failed");
     const tokens = await response.json();
-    const jwks = createRemoteJWKSet(new URL(endpoints.jwks));
+    if (!keySets.has(endpoints.jwks)) keySets.set(endpoints.jwks, createRemoteJWKSet(new URL(endpoints.jwks), { timeoutDuration: providerTimeout }));
+    const jwks = keySets.get(endpoints.jwks);
     const { payload } = await jwtVerify(tokens.id_token, jwks, {
       issuer: oidc.issuer, audience: oidc.clientId, algorithms: signingAlgorithms,
       requiredClaims: ["sub", "exp", "iat", "nonce"],
@@ -175,6 +179,7 @@ async function callback(request, url, env) {
 
     const userInfoResponse = await fetch(endpoints.userinfo, {
       headers: { Authorization: `Bearer ${tokens.access_token}` },
+      signal: AbortSignal.timeout(providerTimeout),
     });
     if (!userInfoResponse.ok) return signInError(env, "userinfo_failed");
     const userInfo = await userInfoResponse.json();
@@ -198,15 +203,17 @@ async function emailStart(request, url, env) {
   if (!env.EMAIL_LINKS || !env.MAIL_PROVIDER) return result(404, { error: "not_found" }); // off unless a mail service is set
   if (request.headers.get("Origin") !== url.origin) return result(403, { error: "same_origin_required" });
   let data;
-  try { data = await request.json(); } catch { return result(400, { error: "invalid_body" }); }
+  try {
+    const text = await readLimited(request, 2000);
+    if (text === null) return result(413, { error: "request_too_large" });
+    data = JSON.parse(text);
+  } catch { return result(400, { error: "invalid_body" }); }
   const email = normalizeEmail(data?.email);
   if (!email) return result(400, { error: "invalid_email" });
-  const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
-  const [byAddress, byIp] = await Promise.all([
-    env.EMAIL_LINKS.getByName("rate-a:" + await sha256Hex(email)).hit(3, 600),
-    env.EMAIL_LINKS.getByName("rate-i:" + await sha256Hex(ip)).hit(10, 600),
-  ]);
-  if (!byAddress || !byIp) return result(429, { error: "too_many_requests" });
+  const ip = networkKey(request.headers.get("CF-Connecting-IP") ?? "unknown");
+  // The network is counted first: a flood from one place cannot use up the owner's allowance for their own address.
+  if (!await env.EMAIL_LINKS.getByName("rate-i:" + await sha256Hex(ip)).hit(10, 600)) return result(429, { error: "too_many_requests" });
+  if (!await env.EMAIL_LINKS.getByName("rate-a:" + await sha256Hex(mailboxKey(email))).hit(3, 600)) return result(429, { error: "too_many_requests" });
   const token = random();
   const rawSource = typeof data.src === "string" ? data.src.toLowerCase() : "";
   await env.EMAIL_LINKS.getByName("token:" + await sha256Hex(token)).put({
@@ -216,7 +223,10 @@ async function emailStart(request, url, env) {
   try {
     await sendLink(env, { to: email, url: `${url.origin}/api/auth/email/verify?token=${token}` });
   } catch (error) {
-    console.error("email_link_send_failed", error instanceof Error ? error.message : "unknown");
+    const reason = error instanceof Error ? error.message : "unknown";
+    console.error("email_link_send_failed", reason);
+    // The mail service refusing this one address looks the same as success; only a service-wide failure is reported.
+    if (/^mail_failed_4/.test(reason)) return result(202, { sent: true, expiresInSeconds: linkLifetimeSeconds });
     return result(502, { error: "mail_unavailable" });
   }
   return result(202, { sent: true, expiresInSeconds: linkLifetimeSeconds });
@@ -228,16 +238,24 @@ async function emailVerify(request, url, env) {
   if (request.method === "GET") {
     const token = url.searchParams.get("token") ?? "";
     if (!tokenPattern.test(token)) return new Response("This link is not valid.", { status: 400, headers: textHeaders });
-    return new Response(confirmPage(token, env.EMAIL_LINK_BRAND), { headers: { ...textHeaders, "Content-Type": "text/html; charset=utf-8" } });
+    const waiting = await env.EMAIL_LINKS.getByName("token:" + await sha256Hex(token)).peek();
+    if (!waiting) return new Response("This link has expired or was already used. Request a new one.", { status: 410, headers: textHeaders });
+    return new Response(confirmPage(token, env.EMAIL_LINK_BRAND, waiting.email), { headers: { ...textHeaders, "Content-Type": "text/html; charset=utf-8" } });
   }
   if (request.headers.get("Origin") !== url.origin) return result(403, { error: "same_origin_required" });
-  const token = String((await request.formData().catch(() => new FormData())).get("token") ?? "");
+  const form = await readLimited(request, 2000);
+  const token = form === null ? "" : String(new URLSearchParams(form).get("token") ?? "");
   if (!tokenPattern.test(token)) return new Response("This link is not valid.", { status: 400, headers: textHeaders });
   const link = await env.EMAIL_LINKS.getByName("token:" + await sha256Hex(token)).consume();
   if (!link) return new Response("This link has expired or was already used. Request a new one.", { status: 410, headers: textHeaders });
   const userInfo = { sub: link.email, email: link.email, email_verified: true };
   const identifier = await participantIdentifier("foyerdesk:email-link", link.email);
-  return finishSignIn(request, env, { identifier, userInfo, transaction: { returnTo: link.returnTo, source: link.source } });
+  const done = await finishSignIn(request, env, { identifier, userInfo, transaction: { returnTo: link.returnTo, source: link.source } });
+  // The link is not used up by a failure on our side (Chatwoot down): the person may press the button again.
+  if (done.status === 303 && (done.headers.get("Location") ?? "").includes("auth_error=")) {
+    await env.EMAIL_LINKS.getByName("token:" + await sha256Hex(token)).put({ email: link.email, returnTo: link.returnTo, source: link.source });
+  }
+  return done;
 }
 
 // The session cookie is "<id>.<signature>". The signature key is derived (HKDF) from a secret the Worker already has, so no new
@@ -315,8 +333,8 @@ async function messages(request, url, env) {
   if (request.headers.get("Origin") !== url.origin) return result(403, { error: "same_origin_required" });
   let data;
   try {
-    const body = await request.text();
-    if (body.length > 12000) return result(413, { error: "request_too_large" });
+    const body = await readLimited(request, 12000);
+    if (body === null) return result(413, { error: "request_too_large" });
     data = JSON.parse(body);
     if (!data || typeof data.requestId !== "string" ||
         !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(data.requestId) ||
@@ -384,8 +402,8 @@ async function topicsApi(request, url, env) {
     return new Response(JSON.stringify({ error: "sign_in_required" }), { status: 401, headers });
   };
   const readBody = async () => {
-    const body = await request.text();
-    if (body.length > 12000) return { error: result(413, { error: "request_too_large" }) };
+    const body = await readLimited(request, 12000);
+    if (body === null) return { error: result(413, { error: "request_too_large" }) };
     try { const data = JSON.parse(body); return data && typeof data === "object" ? { data } : { error: result(400, { error: "invalid_request" }) }; }
     catch { return { error: result(400, { error: "invalid_request" }) }; }
   };
@@ -407,7 +425,7 @@ async function topicsApi(request, url, env) {
       const { data, error } = await readBody();
       if (error) return error;
       if (typeof data.requestId !== "string" || !requestIdPattern.test(data.requestId)) return result(400, { error: "invalid_request_id" });
-      const created = await thread.createTopic(mapping, data.requestId, { subject: data.subject, message: data.message });
+      const created = await thread.createTopic(mapping, data.requestId.toLowerCase(), { subject: data.subject, message: data.message });
       return created.error ? result(status(created.error), { error: created.error }) : result(created.repeated ? 200 : 201, { id: created.id });
     }
     if (!idPattern.test(route[0])) return result(404, { error: "topic_not_found" });
@@ -423,7 +441,7 @@ async function topicsApi(request, url, env) {
       const { data, error } = await readBody();
       if (error) return error;
       if (typeof data.requestId !== "string" || !requestIdPattern.test(data.requestId)) return result(400, { error: "invalid_request_id" });
-      const sent = await thread.replyTopic(mapping, id, data.requestId, data.message);
+      const sent = await thread.replyTopic(mapping, id, data.requestId.toLowerCase(), data.message);
       return sent.error ? result(status(sent.error), { error: sent.error }) : result(200, { accepted: true });
     }
     // /api/support/topics/{id}/resolve and /reopen
@@ -474,10 +492,16 @@ function withBaseHeaders(response) {
   return wrapped;
 }
 
+// The built-in test mode and the single-thread route /api/support/messages are off unless asked for (FOYERDESK_TEST_MODE=1,
+// LEGACY_MESSAGES=1). A missing FULL_PAGE_INBOX_ID is a configuration mistake, not a reason to open a test mode.
+const flag = (value) => String(value ?? "") === "1";
+
 async function handle(request, env) {
     configureChatwoot(env);
     const url = new URL(request.url);
     if (url.origin !== new URL(env.CALLBACK_URI).origin) return result(404, { error: "not_found" });
+    if (env.FULL_PAGE_INBOX_ID === undefined && !flag(env.FOYERDESK_TEST_MODE) && url.pathname.startsWith("/api/")) return result(503, { error: "misconfigured" });
+    if (url.pathname === "/api/support/messages" && env.FULL_PAGE_INBOX_ID !== undefined && !flag(env.LEGACY_MESSAGES)) return result(404, { error: "not_found" });
     if (url.pathname === "/api/auth/email/start" && request.method === "POST") return emailStart(request, url, env);
     if (url.pathname === "/api/auth/email/verify" && (request.method === "GET" || request.method === "POST")) return emailVerify(request, url, env);
     if (url.pathname === "/api/auth/logout" && request.method === "POST") return logout(request, url, env);

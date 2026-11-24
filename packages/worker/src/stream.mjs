@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { readLimited } from "./limits.mjs";
 
 // Chatwoot tells the Worker (signed webhook) that a reply exists; the open page is told "changed" over a
 // hibernating WebSocket and then reads the messages through the normal authenticated history request.
@@ -58,8 +59,8 @@ export async function verifyWebhook(request, secret, nowMs = Date.now()) {
   const signature = hex((request.headers.get("X-Chatwoot-Signature") ?? "").replace(/^sha256=/, ""));
   if (!/^[0-9]{10}$/.test(timestamp) || !signature) return { status: 401, error: "signature_required" };
   if (Math.abs(nowMs / 1000 - Number(timestamp)) > 300) return { status: 401, error: "stale_signature" };
-  const body = await request.text();
-  if (body.length > 262144) return { status: 413, error: "request_too_large" };
+  const body = await readLimited(request, 262144);
+  if (body === null) return { status: 413, error: "request_too_large" };
   const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
   if (!await crypto.subtle.verify("HMAC", key, signature, new TextEncoder().encode(`${timestamp}.${body}`))) {
     return { status: 401, error: "bad_signature" };

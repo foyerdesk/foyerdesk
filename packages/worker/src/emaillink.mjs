@@ -14,6 +14,12 @@ export class EmailLinkStore extends DurableObject {
     await this.ctx.storage.setAlarm(expires);
   }
 
+  // Who the link is for, without using it up (the confirm page shows it).
+  async peek() {
+    const link = await this.ctx.storage.get("link");
+    return link && link.expires > Date.now() ? { email: link.email } : null;
+  }
+
   // Reads and deletes in one step: the first caller wins, everyone after gets null.
   async consume() {
     const link = await this.ctx.storage.get("link");
@@ -41,6 +47,23 @@ export function normalizeEmail(value) {
   return email.length <= 254 && emailPattern.test(email) ? email : null;
 }
 
+// The key the limits count by: the same mailbox must not look like many addresses. Drops "+tag" and, for Gmail, the dots.
+export function mailboxKey(email) {
+  const [local, domain] = email.split("@");
+  let name = local.split("+")[0];
+  if (domain === "gmail.com" || domain === "googlemail.com") name = name.replaceAll(".", "");
+  return name + "@" + (domain === "googlemail.com" ? "gmail.com" : domain);
+}
+
+// One IPv4 address is one visitor; an IPv6 visitor owns a whole /64, so the limit counts the first four groups.
+export function networkKey(ip) {
+  if (!ip.includes(":")) return ip;
+  const [head, tail = ""] = ip.split("::");
+  const groups = head.split(":").filter(Boolean);
+  if (ip.includes("::")) groups.push(...Array(Math.max(0, 8 - groups.length - tail.split(":").filter(Boolean).length)).fill("0"), ...tail.split(":").filter(Boolean));
+  return groups.slice(0, 4).map((g) => g.toLowerCase().padStart(4, "0")).join(":") + "::/64";
+}
+
 export async function sha256Hex(text) {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -66,9 +89,9 @@ const escapeHtml = (text) => text.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<"
 
 // The emailed link only opens this page. Signing in needs a button press (a POST), so mail scanners that
 // fetch links in advance cannot use up the token.
-export function confirmPage(token, brand = "Support") {
+export function confirmPage(token, brand = "Support", email = "") {
   return `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sign in</title>
 <style>body{font:16px system-ui,sans-serif;display:grid;place-items:center;min-height:100vh;margin:0;background:#f6f7f9}main{background:#fff;padding:32px;border-radius:12px;max-width:360px;box-shadow:0 2px 12px #0002;text-align:center}button{font:inherit;padding:12px 24px;border:0;border-radius:8px;background:#2563eb;color:#fff;cursor:pointer}</style>
-<main><h1>${escapeHtml(brand)} support</h1><p>Confirm to finish signing in.</p>
+<main><h1>${escapeHtml(brand)} support</h1><p>Confirm to finish signing in${email ? ` as <strong>${escapeHtml(email)}</strong>` : ""}.</p><p style="font-size:14px;color:#64748b">Not you, or you did not ask for this? Close this page.</p>
 <form method="post" action="/api/auth/email/verify"><input type="hidden" name="token" value="${escapeHtml(token)}"><button type="submit">Sign in</button></form></main></html>`;
 }

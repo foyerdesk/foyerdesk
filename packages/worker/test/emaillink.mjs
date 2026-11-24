@@ -12,16 +12,20 @@ const persistence = await mkdtemp(join(tmpdir(), "emaillink-"));
 const contacts = [];
 const mails = [];
 let mailFails = false;
+let mailRefusesStatus = 0; // the mail service refuses the address with this status
+let chatwootDown = false;
 
 async function upstream(request) {
   const url = new URL(request.url);
   if (url.hostname === "api.resend.com") {
     assert.equal(request.headers.get("Authorization"), "Bearer re_fixture");
     if (mailFails) return new Response(null, { status: 500 });
+    if (mailRefusesStatus) return new Response(null, { status: mailRefusesStatus });
     mails.push(await request.json());
     return Response.json({ id: "mail" });
   }
   const path = url.pathname.replace("/api/v1/accounts/1", "");
+  if (chatwootDown) return new Response(null, { status: 503 });
   if (request.method === "GET" && path === "/contacts/search") {
     const key = url.searchParams.get("q");
     return Response.json({ payload: contacts.filter((row) => row.identifier === key || row.email === key) });
@@ -73,7 +77,7 @@ try {
   const token = tokenOf(mails[0]); ok("link mailed to the normalised address");
 
   const page = await call("/api/auth/email/verify?token=" + token);
-  assert.equal(page.status, 200); assert.match(await page.text(), /method="post"/);
+  assert.equal(page.status, 200); const pageText = await page.text(); assert.match(pageText, /method="post"/); assert.match(pageText, /as <strong>alex@example.com<\/strong>/);
   const again = await call("/api/auth/email/verify?token=" + token);
   assert.equal(again.status, 200); ok("opening the link only shows a button and does not use the token");
 
@@ -104,6 +108,31 @@ try {
   await start("other@example.com", { returnTo: "/talk" });
   const other = await verify(tokenOf(mails.at(-1)));
   assert.equal(other.headers.get("Location"), "/"); ok("by default only /support is a return path; others go to the home page");
+
+  // Limits count the mailbox, not the spelling, and the network, not the single address.
+  const from = (ip) => ({ "CF-Connecting-IP": ip });
+  for (const alias of ["jo.hn@gmail.com", "john+a@gmail.com", "JOHN+b@googlemail.com"]) assert.equal((await start(alias, {}, from("198.51.100.7"))).status, 202);
+  assert.equal((await start("j.o.h.n+zzz@gmail.com", {}, from("198.51.100.8"))).status, 429); ok("aliases (+tag, dots, googlemail) of one mailbox share one allowance");
+  for (let i = 0; i < 10; i += 1) assert.equal((await start(`v6user${i}@example.com`, {}, from(`2001:db8:1:2:${i}::${i + 1}`))).status, 202);
+  assert.equal((await start("v6extra@example.com", {}, from("2001:db8:1:2:ffff::9"))).status, 429);
+  assert.equal((await start("v6other@example.com", {}, from("2001:db8:1:3::1"))).status, 202); ok("an IPv6 visitor is limited as a whole /64, another /64 is not affected");
+  // A flood from one network must not use up the owner's own allowance for their address.
+  for (let i = 0; i < 10; i += 1) await start(`flood${i}@example.com`, {}, from("203.0.113.50"));
+  assert.equal((await start("owner@example.com", {}, from("203.0.113.50"))).status, 429);
+  assert.equal((await start("owner@example.com", {}, from("203.0.113.60"))).status, 202); ok("a refused request from a flooding network does not count against the owner's address");
+
+  // The mail service refusing one address looks like success; only a service-wide failure is reported.
+  mailRefusesStatus = 422; assert.equal((await start("refused@example.com", {}, from("192.0.2.1"))).status, 202); mailRefusesStatus = 0; ok("an address the mail service refuses gets the same answer as any other");
+
+  // Chatwoot failing after the button is pressed must not burn the link.
+  await start("retry@example.com", {}, from("192.0.2.2"));
+  const retryToken = tokenOf(mails.at(-1));
+  chatwootDown = true;
+  const failedTry = await verify(retryToken);
+  assert.equal(failedTry.status, 303); assert.match(failedTry.headers.get("Location"), /auth_error=contact_provisioning_unavailable/);
+  chatwootDown = false;
+  const secondTry = await verify(retryToken);
+  assert.equal(secondTry.status, 303); assert.equal(secondTry.headers.get("Location"), "/"); ok("the link survives a Chatwoot outage and works when the button is pressed again");
 
   // Mail service down: the person is told, no link is claimed as sent.
   mailFails = true;

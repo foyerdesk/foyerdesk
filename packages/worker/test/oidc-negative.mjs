@@ -69,7 +69,7 @@ const worker = new Miniflare(convertV4MiniflareOptions({
     LOGTO_ISSUER: issuer, LOGTO_CLIENT_ID: clientId, LOGTO_CLIENT_SECRET: secret,
     CHATWOOT_BASE_URL: "https://chat.example.invalid", CHATWOOT_ACCOUNT_ID: "1", IDENTIFIER_PREFIX: "acme-", DEFAULT_CONTACT_NAME: "Customer",
     RETURN_PATHS: "/support", CALLBACK_URI: site + "/api/auth/callback", CHATWOOT_APPLICATION_TOKEN: "synthetic-chatwoot-token", CHATWOOT_WEBHOOK_SECRET: "w",
-    FULL_PAGE_TEST_IDENTIFIER: identifier, FULL_PAGE_SOURCE_ID: "synthetic-source",
+    FOYERDESK_TEST_MODE: "1", LEGACY_MESSAGES: "1", FULL_PAGE_TEST_IDENTIFIER: identifier, FULL_PAGE_SOURCE_ID: "synthetic-source",
   },
 }));
 const call = (path, options = {}) => worker.dispatchFetch(site + path, { redirect: "manual", ...options });
@@ -207,6 +207,34 @@ try {
     }
     assert.equal(codes.filter((c) => c === 429).length, 1);
     assert.equal(codes[30], 429);
+  });
+  await check("a request body that is too large is refused while it is read, with or without a length header", async () => {
+    const cookie = (await attempt()).headers.getSetCookie().find((c) => c.startsWith("__Host-foyerdesk-session=")).split(";")[0];
+    const headers = { Cookie: cookie, Origin: site, "Content-Type": "application/json" };
+    const big = JSON.stringify({ requestId: crypto.randomUUID(), message: "x".repeat(13000) });
+    assert.equal((await call("/api/support/messages", { method: "POST", headers, body: big })).status, 413);
+    const endless = new ReadableStream({ start(controller) { for (let i = 0; i < 20; i += 1) controller.enqueue(new TextEncoder().encode("y".repeat(1000))); controller.close(); } });
+    assert.equal((await call("/api/support/messages", { method: "POST", headers, body: endless, duplex: "half" })).status, 413);
+    assert.equal((await call("/api/support/webhook", { method: "POST", headers: { "X-Chatwoot-Timestamp": String(Math.floor(Date.now() / 1000)), "X-Chatwoot-Signature": "sha256=" + "0".repeat(64) }, body: "z".repeat(300000) })).status, 413);
+  });
+  await check("a Worker without FULL_PAGE_INBOX_ID and without the test flag answers 503 misconfigured; the pages still load", async () => {
+    const bare = new Miniflare(convertV4MiniflareOptions({ modules: true, script, compatibilityDate: "2026-10-19",
+      durableObjects: { SUPPORT_SESSIONS: { className: "TestSupportSession", useSQLite: true, unsafeUniqueKey: "bare-s" }, FULL_PAGE_THREAD: { className: "TestSupportThread", useSQLite: true, unsafeUniqueKey: "bare-t" }, SUPPORT_STREAM: { className: "SupportStream", useSQLite: true, unsafeUniqueKey: "bare-x" } },
+      bindings: { CHATWOOT_BASE_URL: "https://chat.example.invalid", CHATWOOT_ACCOUNT_ID: "1", CALLBACK_URI: site + "/api/auth/callback", LOGTO_ISSUER: issuer, LOGTO_CLIENT_ID: clientId, LOGTO_CLIENT_SECRET: secret } }));
+    try {
+      for (const path of ["/api/support/session", "/api/auth/login", "/api/support/messages", "/api/support/topics"]) {
+        assert.equal((await bare.dispatchFetch(site + path, { redirect: "manual" })).status, 503, path);
+      }
+    } finally { await bare.dispose(); }
+  });
+  await check("the single-thread route is off in a production Worker unless LEGACY_MESSAGES=1", async () => {
+    const live = new Miniflare(convertV4MiniflareOptions({ modules: true, script, compatibilityDate: "2026-10-19",
+      durableObjects: { SUPPORT_SESSIONS: { className: "TestSupportSession", useSQLite: true, unsafeUniqueKey: "live-s" }, FULL_PAGE_THREAD: { className: "TestSupportThread", useSQLite: true, unsafeUniqueKey: "live-t" }, SUPPORT_STREAM: { className: "SupportStream", useSQLite: true, unsafeUniqueKey: "live-x" } },
+      bindings: { CHATWOOT_BASE_URL: "https://chat.example.invalid", CHATWOOT_ACCOUNT_ID: "1", CALLBACK_URI: site + "/api/auth/callback", FULL_PAGE_INBOX_ID: "4", LOGTO_ISSUER: issuer, LOGTO_CLIENT_ID: clientId, LOGTO_CLIENT_SECRET: secret } }));
+    try {
+      assert.equal((await live.dispatchFetch(site + "/api/support/messages")).status, 404);
+      assert.equal((await live.dispatchFetch(site + "/api/support/session")).status, 401); // the other routes are there
+    } finally { await live.dispose(); }
   });
   await check("a garbage session cookie is the same as none", async () => {
     const response = await call("/api/support/session", { headers: { Cookie: "__Host-foyerdesk-session=" + "a".repeat(43) + "." + "b".repeat(43) } });

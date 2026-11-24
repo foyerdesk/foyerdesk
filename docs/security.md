@@ -21,10 +21,18 @@ How FoyerDesk is meant to protect customer conversations, and what is checked by
 | A customer is limited to 30 writes a minute (in memory, no storage write); the 31st gets 429 | `thread.mjs` | `oidc-negative` |
 | Signing out closes the contact's open live channel | `worker.mjs`, `stream.mjs` | acceptance |
 
+| Request bodies are read with a size cap while they arrive (12 KB for writes, 2 KB for the emailed link, 256 KB for the webhook); a missing or false length header does not help | `limits.mjs` | `oidc-negative` |
+| Request records (idempotency) are removed after 48 hours | `thread.mjs` | acceptance |
+| Calls to the sign-in provider time out after 8 seconds; its endpoints must be `https`; discovery is cached for an hour | `oidc.mjs` | unit |
+| A Worker without `FULL_PAGE_INBOX_ID` answers 503 `misconfigured` (the built-in test mode needs `FOYERDESK_TEST_MODE=1`); the single-thread route `/api/support/messages` is off unless `LEGACY_MESSAGES=1` | `worker.mjs` | `oidc-negative` |
+| Emailed link: the confirm page shows which address is being signed in; limits count the mailbox (no `+tag`, no Gmail dots) and the IPv6 /64, the network is counted before the address; an address the mail service refuses gets the normal answer; a Chatwoot outage does not use up the link | `emaillink.mjs`, `worker.mjs` | `emaillink` |
+| A person whose verified address changed at the provider keeps the contact (the address follows) unless another contact owns it | `contact.mjs` | acceptance |
+| Contact search reads up to five pages | `contact.mjs` | acceptance |
+| A contact deleted in Chatwoot ends the session when a topic is started | `thread.mjs`, `worker.mjs` | acceptance |
+
 ## Not covered
-- **Known gaps from the 2026-11-24 independent review, not yet fixed:** the idempotency ledger has no expiry; email-link limits can be bypassed with `+` aliases and IPv6 and the link is not tied to the browser that asked for it; a visitor whose email changed at the provider is blocked (`explicit_contact_linking_required`) with no self-service way back; a socket that is open when the 15-minute session simply expires stays open until the page closes it. See `docs/ROADMAP.md`.
+- **Known gaps from the 2026-11-24 independent review, not yet fixed:** the emailed link is not tied to the browser that asked for it (only shows the address; binding would break opening it on another device, a decision for the owner); a socket that is open when the 15-minute session simply expires stays open until the page closes it; a retry of an unconfirmed reply looks only at the last 20 messages of the topic; the "unconfirmed" legacy reservation has no expiry (the route is off by default). See `docs/ROADMAP.md`.
 - **Attachments** are off. They need server-side type and size checks first.
-- **Rate limits** exist only for the emailed link. Cloudflare's own protections apply to the rest.
+- **Rate limits:** the emailed link and 30 writes a minute per customer exist in the Worker; a flood of requests is for a Cloudflare rate-limiting rule to stop.
 - **A Chatwoot contact with the same email but another identifier** blocks sign-in on purpose rather than merging.
-- The test mode inside the Worker (used when `FULL_PAGE_INBOX_ID` is unset) must stay unset in production.
 - No external security review has been done.
