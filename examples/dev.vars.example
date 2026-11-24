@@ -1,0 +1,8 @@
+# Local settings for `wrangler dev` (copy to .dev.vars, which git ignores). Never commit real values.
+# Not exercised by this repository's tests; see docs/configuration.md for what each name means.
+CHATWOOT_APPLICATION_TOKEN=replace-me
+CHATWOOT_CONTACT_SOURCE_KEY=replace-with-a-long-random-string
+CHATWOOT_WEBHOOK_SECRET=replace-me
+OIDC_CLIENT_SECRET=replace-me
+# Only for the emailed-link sign-in:
+# RESEND_API_KEY=replace-me

@@ -1,0 +1,8 @@
+{
+  "list": ["page", "pages", "topics", "total"],
+  "listItem": ["at", "id", "preview", "status", "subject", "tab", "unread"],
+  "messages": ["hasMore", "messages", "topic"],
+  "message": ["at", "author", "direction", "id", "text"],
+  "topic": ["actions", "id", "status", "subject"],
+  "statusChange": ["actions", "status"]
+}

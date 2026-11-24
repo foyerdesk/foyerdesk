@@ -1,0 +1,22 @@
+{
+  "name": "@foyerdesk/ui",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Foyerdesk screens: plain browser modules, no framework.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/foyerdesk.js",
+    "./style.css": "./src/foyerdesk.css"
+  },
+  "scripts": {
+    "test": "playwright test",
+    "test:i18n": "node --test test/i18n.test.mjs",
+    "test:real": "node test/live/real-worker.mjs ../worker/.build/worker.js",
+    "demo": "node demo/server.mjs",
+    "media": "mkdir -p ../../.media ../../docs/screenshots && SHOTS=../../.media playwright test media && sh scripts/gif.sh ../../.media && cp ../../.media/*.png ../../.media/demo.gif ../../docs/screenshots/ && node -e \"require('fs').unlinkSync('../../docs/screenshots/palette.png')\""
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1"
+  }
+}

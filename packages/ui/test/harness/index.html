@@ -1,0 +1,9 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Support</title>
+<link rel="stylesheet" href="/src/foyerdesk.css"></head>
+<body><div id="app"></div>
+<script type="module">
+  import { mountFoyerdesk } from "/src/foyerdesk.js";
+  const lang = new URLSearchParams(location.search).get("lang") ?? undefined;
+  window.__fd = mountFoyerdesk(document.getElementById("app"), { lang, loginUrl: "/api/auth/login?returnTo=%2Ftalk" });
+</script></body></html>

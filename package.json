@@ -1,0 +1,18 @@
+{
+  "name": "foyerdesk",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Customer support cabinet (topics, history, live replies) on top of Chatwoot. Cloudflare Worker with generic OIDC sign-in.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "test": "npm run test:unit && npm run test:acceptance && npm run test:ui",
+    "test:unit": "npm run test:unit -w packages/worker",
+    "test:acceptance": "npm run test:acceptance -w packages/worker",
+    "test:ui": "npm run test:i18n -w packages/ui && npm test -w packages/ui",
+    "setup:browser": "npm exec -w packages/ui -- playwright install chromium"
+  }
+}

@@ -1,0 +1,9 @@
+node_modules/
+.build/
+.wrangler/
+*.log
+.env
+.dev.vars
+examples/**/.build/
+test-results/
+.media/
