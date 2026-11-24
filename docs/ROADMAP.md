@@ -3,7 +3,7 @@
 One place for what is open in this repository: housekeeping, known gaps, verification debts and planned features. Update it in the same pull request that closes or adds an item. State on 2026-11-24.
 
 ## Done at publication
-Public repository with one-commit history, branch protection (check `test`), Dependabot, secret scanning with push protection, CodeQL, private vulnerability reporting, social preview uploaded, README with real screenshots, documentation set, CI green.
+Public repository whose history starts from a single commit (later work is ordinary commits), branch protection (check `test`), Dependabot, secret scanning with push protection, CodeQL, private vulnerability reporting, social preview uploaded, README with real screenshots, documentation set, CI green.
 
 ## Housekeeping (maintainer)
 | Item | Notes |

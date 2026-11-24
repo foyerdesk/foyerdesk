@@ -7,3 +7,5 @@ node_modules/
 examples/**/.build/
 test-results/
 .media/
+__pycache__/
+*.pyc

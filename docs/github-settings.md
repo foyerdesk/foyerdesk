@@ -1,6 +1,6 @@
 # GitHub repository settings (for the maintainer)
 
-State on 2026-11-24, when the repository became public. The previous private repository (with the full working history) is archived as `foyerdesk/foyerdesk-private-archive`; this one starts from a single commit.
+State on 2026-11-24, when the repository became public. The previous private repository (with the full working history) is archived as `foyerdesk/foyerdesk-private-archive`; this one's history starts from a single commit; later work is ordinary commits. Commit hashes quoted in the owner's change records before 2026-11-24 belong to the private archive.
 
 | Setting | Value | State |
 |---|---|---|

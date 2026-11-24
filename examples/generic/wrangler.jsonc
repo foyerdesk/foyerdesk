@@ -1,0 +1,38 @@
+{
+  // Copy this file anywhere; then fix "main" (the path is relative to THIS file) and every value marked CHANGE.
+  "name": "CHANGE-my-support-worker",
+  "account_id": "CHANGE-your-cloudflare-account-id",
+  "main": "../../packages/worker/src/worker.mjs",
+  "compatibility_date": "2026-11-23",
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [
+    { "pattern": "CHANGE-your-site.example/api/auth/*", "zone_name": "CHANGE-your-site.example" },
+    { "pattern": "CHANGE-your-site.example/api/support/*", "zone_name": "CHANGE-your-site.example" }
+  ],
+  "vars": {
+    "OIDC_ISSUER": "https://CHANGE-your-provider.example/oidc",
+    "OIDC_CLIENT_ID": "CHANGE",
+    "OIDC_FLAVOR": "generic",
+    "CALLBACK_URI": "https://CHANGE-your-site.example/api/auth/callback",
+    "CHATWOOT_BASE_URL": "https://CHANGE-your-chatwoot.example",
+    "CHATWOOT_ACCOUNT_ID": "CHANGE",
+    "FULL_PAGE_INBOX_ID": "CHANGE",
+    "IDENTIFIER_PREFIX": "CHANGE-short-prefix-",
+    "RETURN_PATHS": "/support"
+  },
+  "durable_objects": {
+    "bindings": [
+      { "name": "SUPPORT_SESSIONS", "class_name": "TestSupportSession" },
+      { "name": "FULL_PAGE_THREAD", "class_name": "TestSupportThread" },
+      { "name": "SUPPORT_STREAM", "class_name": "SupportStream" },
+      { "name": "EMAIL_LINKS", "class_name": "EmailLinkStore" }
+    ]
+  },
+  "migrations": [
+    { "tag": "session-v1", "new_sqlite_classes": ["TestSupportSession"] },
+    { "tag": "thread-v1", "new_sqlite_classes": ["TestSupportThread"] },
+    { "tag": "stream-v1", "new_sqlite_classes": ["SupportStream"] },
+    { "tag": "emaillink-v1", "new_sqlite_classes": ["EmailLinkStore"] }
+  ]
+}

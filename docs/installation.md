@@ -12,27 +12,28 @@ FoyerDesk has two parts: the **Worker** (server side, runs on Cloudflare Workers
 
 ## 1. Try the screens in two minutes (no Chatwoot, no accounts)
 ```
-npm install
+npm ci
 npm run demo -w packages/ui        # opens on http://127.0.0.1:4180/
 ```
 This runs the real screens against a small in-memory stand-in for the Worker. Data is demo data and resets when you stop it.
 
 ## 2. Check the code
 ```
-npm install
+npm ci
 npm run setup:browser    # once, for the screen tests
 npm test                           # worker unit and acceptance tests, then screen tests
 ```
 
 ## 3. Prepare Chatwoot
-Follow [chatwoot-integration.md](chatwoot-integration.md): an API-channel inbox, an integration user and its token, a webhook.
+Follow [chatwoot-integration.md](chatwoot-integration.md): an API-channel inbox, an integration user and its token, a webhook. The webhook address (`https://<your-site>/api/support/webhook`) does not answer until the Worker is deployed (step 5); after deploying, send a test event from Chatwoot or check that an unsigned POST gives `401` with `curl -i -X POST https://<your-site>/api/support/webhook`.
 
 ## 4. Prepare sign-in
 Follow [authentication.md](authentication.md).
 
 ## 5. Deploy the Worker
-1. Copy `examples/lavatti/wrangler.jsonc` to your own file. Change `name`, `account_id`, the two `routes` (`<your-site>/api/auth/*` and `<your-site>/api/support/*`, with your `zone_name`) and the `vars` (see [configuration.md](configuration.md)). Keep the Durable Object bindings and migrations.
-2. Store the secrets:
+1. Copy `examples/generic/wrangler.jsonc` (every value to change starts with `CHANGE`; `examples/lavatti/wrangler.jsonc` is a real deployment, with someone else's account id and client id, for reference only). `main` is relative to the file: if you move the copy, fix that path. Change `name`, `account_id`, the two `routes` and the `vars` (see [configuration.md](configuration.md)). Keep the Durable Object bindings and migrations.
+2. Deploy once first (step 3 below), then store the secrets. Wrangler offers to create an empty Worker if you set a secret before the first deploy. Until the secrets exist, sign-in and the webhook answer with an error (`client_secret_unavailable`, `webhook_secret_unavailable`); that is expected.
+   Secrets:
    ```
    cd packages/worker
    npx wrangler secret put CHATWOOT_APPLICATION_TOKEN --config <your wrangler file>
@@ -52,7 +53,7 @@ Copy `packages/ui/src/foyerdesk.js`, `api.js`, `dom.js`, `i18n/` and `foyerdesk.
   mountFoyerdesk(document.getElementById("support"), { brand: "Support", loginUrl: "/api/auth/login?returnTo=%2Fsupport" });
 </script>
 ```
-Options: `lang`, `apiBase`, `authBase`, `loginUrl`, `brand`. Colours are CSS variables on `.fd`; a dark page adds the class `dark` on `<html>`.
+Options: `lang`, `apiBase`, `authBase`, `loginUrl`, `brand`, `headingLevel` (1 to 6, the level of the screen heading; default 1). `?src=<value>` on the page address (letters, digits, `_`, `-`, up to 32) is passed on with the sign-in link and stored on the contact as the source. Colours are CSS variables on `.fd`; a dark page adds the class `dark` on `<html>`.
 
 ## 7. Verify before announcing
 1. Open the page, sign in, create a topic, answer it from Chatwoot: the reply must appear within seconds without reloading.

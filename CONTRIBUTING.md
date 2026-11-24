@@ -32,3 +32,6 @@ Do not open a public issue for a vulnerability; see [SECURITY.md](SECURITY.md).
 
 ## Licence
 By contributing you agree that your work is released under the Apache License 2.0 (see `LICENSE`).
+
+## Tools
+Node 22 or newer (`engines` in package.json). Use `npm ci`, not `npm install`. `npm run media` (screenshots and the GIF) also needs `ffmpeg`.

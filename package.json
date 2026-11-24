@@ -14,5 +14,8 @@
     "test:acceptance": "npm run test:acceptance -w packages/worker",
     "test:ui": "npm run test:i18n -w packages/ui && npm test -w packages/ui",
     "setup:browser": "npm exec -w packages/ui -- playwright install chromium"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }
