@@ -13,7 +13,9 @@ export { SupportStream } from "./stream.mjs";
 export { EmailLinkStore };
 
 // Pages a visitor may be sent back to after signing in (anything else goes to the home page).
-const returnPaths = new Set(["/talk", "/support"]);
+// Pages a visitor may be sent back to after signing in. RETURN_PATHS is a comma-separated list (default "/support"); the first one is also where a failed sign-in is reported.
+const returnPaths = (env) => String(env.RETURN_PATHS ?? "/support").split(",").map((path) => path.trim()).filter((path) => /^\/[a-z0-9_\/-]*$/.test(path));
+const isReturnPath = (env, path) => typeof path === "string" && returnPaths(env).includes(path);
 const cookieName = "__Host-foyerdesk-oidc";
 const cookieFlags = "Path=/; Secure; HttpOnly; SameSite=Lax";
 const lifetimeSeconds = 900;
@@ -37,7 +39,7 @@ async function login(request, env) {
   let endpoints;
   try { endpoints = await oidcEndpoints(oidc); } catch { return result(502, { error: "provider_unavailable" }); }
   const wanted = new URL(request.url).searchParams.get("returnTo");
-  const returnTo = returnPaths.has(wanted) ? wanted : "/";
+  const returnTo = isReturnPath(env, wanted) ? wanted : "/";
   const rawSource = (new URL(request.url).searchParams.get("src") ?? "").toLowerCase();
   const source = /^[a-z0-9_-]{1,32}$/.test(rawSource) ? rawSource : undefined;
   const transaction = { verifier: random(), state: random(), nonce: random(), at: Date.now(), returnTo, source };
@@ -97,7 +99,7 @@ async function finishSignIn(request, env, { identifier, userInfo, transaction })
     provider: Object.keys(userInfo.identities ?? {})[0] ?? "email",
     picture: typeof userInfo.picture === "string" && /^https:\/\//.test(userInfo.picture) ? userInfo.picture.slice(0, 500) : null };
   await env.SUPPORT_SESSIONS.getByName(sessionId).save({ identifier, mapping, account });
-  const headers = new Headers({ Location: returnPaths.has(transaction.returnTo) ? transaction.returnTo : "/", "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" });
+  const headers = new Headers({ Location: isReturnPath(env, transaction.returnTo) ? transaction.returnTo : "/", "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" });
   headers.append("Set-Cookie", `${cookieName}=; ${cookieFlags}; Max-Age=0`);
   headers.append("Set-Cookie", `${reauthCookie}=; ${cookieFlags}; Max-Age=0`);
   headers.append("Set-Cookie", `${retryCookie}=; ${cookieFlags}; Max-Age=0`);
@@ -105,17 +107,18 @@ async function finishSignIn(request, env, { identifier, userInfo, transaction })
   return new Response(null, { status: 303, headers });
 }
 
-function restartOrFail(request, error) {
+function restartOrFail(request, env, error) {
+  const home = returnPaths(env)[0] ?? "/";
   const cookies = request.headers.get("Cookie") ?? "";
   const headers = new Headers({ "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" });
   headers.append("Set-Cookie", `${cookieName}=; ${cookieFlags}; Max-Age=0`);
   if (cookies.split("; ").includes(retryCookie + "=1")) {
     headers.append("Set-Cookie", `${retryCookie}=; ${cookieFlags}; Max-Age=0`);
-    headers.set("Location", "/talk?auth_error=" + error);
+    headers.set("Location", home + "?auth_error=" + error);
     return new Response(null, { status: 303, headers });
   }
   headers.append("Set-Cookie", `${retryCookie}=1; ${cookieFlags}; Max-Age=120`);
-  headers.set("Location", "/api/auth/login?returnTo=%2Ftalk");
+  headers.set("Location", "/api/auth/login?returnTo=" + encodeURIComponent(home));
   return new Response(null, { status: 303, headers });
 }
 
@@ -126,13 +129,13 @@ async function callback(request, url, env) {
       .find((value) => value.startsWith(cookieName + "="));
     transaction = JSON.parse(decodeURIComponent(cookie?.slice(cookieName.length + 1) ?? ""));
   } catch {
-    return restartOrFail(request, "missing_transaction");
+    return restartOrFail(request, env, "missing_transaction");
   }
   if (typeof transaction?.at !== "number" || typeof transaction.verifier !== "string" ||
       typeof transaction.nonce !== "string" || !transaction.state ||
       transaction.state !== url.searchParams.get("state") ||
       Date.now() - transaction.at > lifetimeSeconds * 1000) {
-    return restartOrFail(request, "invalid_transaction");
+    return restartOrFail(request, env, "invalid_transaction");
   }
   const code = url.searchParams.get("code");
   if (url.searchParams.has("error") || !code) {
@@ -197,7 +200,7 @@ async function emailStart(request, url, env) {
   const token = random();
   const rawSource = typeof data.src === "string" ? data.src.toLowerCase() : "";
   await env.EMAIL_LINKS.getByName("token:" + await sha256Hex(token)).put({
-    email, returnTo: returnPaths.has(data.returnTo) ? data.returnTo : "/",
+    email, returnTo: isReturnPath(env, data.returnTo) ? data.returnTo : "/",
     source: /^[a-z0-9_-]{1,32}$/.test(rawSource) ? rawSource : undefined,
   });
   try {

@@ -217,7 +217,7 @@ function runtime(clockOffset = 0) {
     outboundService: upstream,
     bindings: {
       LOGTO_ISSUER: issuer, LOGTO_CLIENT_ID: clientId, LOGTO_CLIENT_SECRET: "synthetic-secret",
-      CHATWOOT_BASE_URL: "https://chat.example.invalid", CHATWOOT_ACCOUNT_ID: "1", IDENTIFIER_PREFIX: "acme-", DEFAULT_CONTACT_NAME: "Customer", CALLBACK_URI: site + "/api/auth/callback", CHATWOOT_APPLICATION_TOKEN: "synthetic-chatwoot-token", CHATWOOT_WEBHOOK_SECRET: "synthetic-webhook-secret",
+      CHATWOOT_BASE_URL: "https://chat.example.invalid", CHATWOOT_ACCOUNT_ID: "1", IDENTIFIER_PREFIX: "acme-", DEFAULT_CONTACT_NAME: "Customer", RETURN_PATHS: "/talk,/support", CALLBACK_URI: site + "/api/auth/callback", CHATWOOT_APPLICATION_TOKEN: "synthetic-chatwoot-token", CHATWOOT_WEBHOOK_SECRET: "synthetic-webhook-secret",
       FULL_PAGE_TEST_IDENTIFIER: identifier, FULL_PAGE_SOURCE_ID: "synthetic-source",
       ...(multiUser ? { FULL_PAGE_INBOX_ID: "4", CHATWOOT_CONTACT_SOURCE_KEY: "fixture-source-key", CHATWOOT_INBOX_IDENTIFIER: "inbox-identifier" } : {}),
     },

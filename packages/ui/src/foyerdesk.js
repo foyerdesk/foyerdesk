@@ -65,6 +65,37 @@ export function mountFoyerdesk(root, options = {}) {
     document.title = n > 0 ? `(${n}) ${baseTitle}` : baseTitle;
   };
 
+  // Where the visitor came from (for example ?src=linkedin). Kept for the tab and sent along with the sign-in link, so the site can tell the team.
+  const sourceKey = "foyerdesk-src";
+  const readSource = () => {
+    try {
+      const fromLink = (new URLSearchParams(location.search).get("src") ?? "").toLowerCase();
+      if (/^[a-z0-9_-]{1,32}$/.test(fromLink)) sessionStorage.setItem(sourceKey, fromLink);
+      return sessionStorage.getItem(sourceKey) ?? "";
+    } catch { return ""; }
+  };
+  const signInHref = () => {
+    const source = readSource();
+    return source && !/[?&]src=/.test(loginUrl) ? loginUrl + (loginUrl.includes("?") ? "&" : "?") + "src=" + encodeURIComponent(source) : loginUrl;
+  };
+  readSource();
+
+  // Text typed but not sent survives a sign-in or an ended session (kept in this tab only, and only offered again to the same account). Signing out deletes it.
+  const draftPrefix = "foyerdesk-draft-";
+  const draftOwner = () => String(s.account?.email ?? s.account?.name ?? "");
+  const loadDraft = (name) => {
+    try { const d = JSON.parse(sessionStorage.getItem(draftPrefix + name) ?? "null"); return d && d.owner === draftOwner() && draftOwner() ? d : null; } catch { return null; }
+  };
+  const saveDraft = (name, fields) => {
+    try {
+      if (Object.values(fields).every((v) => !String(v).trim())) sessionStorage.removeItem(draftPrefix + name);
+      else sessionStorage.setItem(draftPrefix + name, JSON.stringify({ owner: draftOwner(), ...fields }));
+    } catch { /* storage unavailable: the text just is not kept */ }
+  };
+  const clearDrafts = () => {
+    try { Object.keys(sessionStorage).filter((k) => k.startsWith(draftPrefix)).forEach((k) => sessionStorage.removeItem(k)); } catch { /* nothing kept */ }
+  };
+
   // ---------- session and guest ----------
   function endSession(reason) {
     s.epoch += 1;
@@ -96,7 +127,7 @@ export function mountFoyerdesk(root, options = {}) {
       h("div", { class: "fd-auth-card", "data-reason": key ?? "" }, h(brandTag, { class: "fd-brand", text: brand }),
         key ? null : h("p", { class: "fd-muted", text: t("intro") }),
         heading, h("p", { role: "status", "data-testid": "guest-notice", class: "fd-muted", text: body }),
-        h("a", { class: "fd-btn fd-primary", href: loginUrl, onclick: rememberTarget, text: key === "signedOut" ? t("signInAgain") : t("signIn") }))));
+        h("a", { class: "fd-btn fd-primary", href: signInHref(), onclick: rememberTarget, text: key === "signedOut" ? t("signInAgain") : t("signIn") }))));
     if (s.reason === "signedOut") heading.focus();
   }
 
@@ -119,7 +150,10 @@ export function mountFoyerdesk(root, options = {}) {
     openRoute(); // the page is usable at once; the side list fills in when it arrives and never rebuilds what the visitor is typing
     connect();
     scheduleSafety();
-    await loadRecent();
+    const loaded = await loadRecent();
+    if (mine !== s.epoch) return;
+    // A visitor with no topics yet (for example one who followed a link from a message) goes straight to writing, not to an empty list.
+    if (loaded && s.recent.total === 0 && s.route.name === "list" && !location.hash.replace("#", "")) location.replace("#/new");
   }
 
   // ---------- shell ----------
@@ -175,14 +209,15 @@ export function mountFoyerdesk(root, options = {}) {
     const res = await api.topics("all", 1);
     if (mine !== s.epoch) return;
     if (res.status === 401) return endSession("expired");
-    if (res.status === 200 && res.data) { s.recent = { topics: res.data.topics ?? [], total: res.data.total ?? 0 }; renderRecent(); }
+    if (res.status === 200 && res.data) { s.recent = { topics: res.data.topics ?? [], total: res.data.total ?? 0 }; renderRecent(); return true; }
+    return false;
   }
 
   async function signOut() {
     const mine = s.epoch;
     const res = await api.logout();
     if (mine !== s.epoch) return;
-    if (res.status >= 200 && res.status < 300) endSession("signedOut");
+    if (res.status >= 200 && res.status < 300) { clearDrafts(); endSession("signedOut"); }
     else main.prepend(h("p", { class: "fd-error", role: "alert", "data-testid": "signout-error", text: t("signOutFailed") }));
   }
 
@@ -262,11 +297,15 @@ export function mountFoyerdesk(root, options = {}) {
       const res = await api.createTopic({ requestId: s.newDraft.requestId, ...(title ? { subject: title } : {}), message: text });
       if (mine !== s.epoch) return;
       if (res.status === 401) return endSession("expired");
-      if ((res.status === 200 || res.status === 201) && res.data?.id) { s.newDraft = null; loadRecent(); location.hash = `#/topic/${res.data.id}`; return; }
+      if ((res.status === 200 || res.status === 201) && res.data?.id) { s.newDraft = null; saveDraft("new", {}); loadRecent(); location.hash = `#/topic/${res.data.id}`; return; }
       submit.disabled = false; submit.textContent = t("create");
       error.hidden = false; error.textContent = errorText(res);
       if (res.data?.error === "conflict") s.newDraft = null;
     });
+    const kept = loadDraft("new");
+    if (kept) { subject.value = kept.subject ?? ""; message.value = kept.message ?? ""; }
+    const keep = () => saveDraft("new", { subject: subject.value, message: message.value });
+    subject.addEventListener("input", keep); message.addEventListener("input", keep);
     clear(main).append(h("div", { class: "fd-page-head" }, h("h2", { text: t("newTopicTitle") })), form);
     message.focus();
   }
@@ -284,6 +323,9 @@ export function mountFoyerdesk(root, options = {}) {
     const scroller = h("div", { class: "fd-thread", role: "region", tabindex: "0", "aria-label": t("conversation"), "data-testid": "thread" }, olderSlot, list);
     const jump = h("button", { type: "button", class: "fd-jump", hidden: true, "data-testid": "new-message", text: t("newMessageBelow"), onclick: () => toBottom(true) });
     const box = h("textarea", { id: "fd-reply", rows: "3", maxlength: "3000", "aria-label": t("reply"), placeholder: t("replyPlaceholder") });
+    const keptReply = loadDraft("reply-" + id);
+    if (keptReply) box.value = keptReply.message ?? "";
+    box.addEventListener("input", () => saveDraft("reply-" + id, { message: box.value }));
     const send = h("button", { type: "submit", class: "fd-btn fd-primary", "data-testid": "send", text: t("send") });
     const status = h("p", { class: "fd-muted fd-small", role: "status", "data-testid": "sent", hidden: true });
     const composer = h("form", { class: "fd-composer", novalidate: true }, box, h("div", { class: "fd-actions" }, status, send));
@@ -307,7 +349,7 @@ export function mountFoyerdesk(root, options = {}) {
       send.disabled = false;
       if (res.status === 401) return endSession("expired");
       if (res.status === 404) { notice.hidden = false; notice.textContent = t("topicNotFound"); return; }
-      if (res.status === 200) { s.replyDraft = null; box.value = ""; status.hidden = false; status.textContent = t("sent"); await pullTopic(view, true); loadRecent(); return; }
+      if (res.status === 200) { s.replyDraft = null; box.value = ""; saveDraft("reply-" + id, {}); status.hidden = false; status.textContent = t("sent"); await pullTopic(view, true); loadRecent(); return; }
       notice.hidden = false; notice.textContent = errorText(res);
     });
     box.addEventListener("keydown", (e) => { if ((e.ctrlKey || e.metaKey) && e.key === "Enter") composer.requestSubmit(); });

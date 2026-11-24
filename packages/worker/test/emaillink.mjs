@@ -100,6 +100,11 @@ try {
   assert.equal((await start("alex@example.com")).status, 202);
   assert.equal((await start("alex@example.com")).status, 429); ok("fourth link for one address is refused");
 
+  // Without RETURN_PATHS only /support is a valid place to return to.
+  await start("other@example.com", { returnTo: "/talk" });
+  const other = await verify(tokenOf(mails.at(-1)));
+  assert.equal(other.headers.get("Location"), "/"); ok("by default only /support is a return path; others go to the home page");
+
   // Mail service down: the person is told, no link is claimed as sent.
   mailFails = true;
   assert.equal((await start("down@example.com")).status, 502); mailFails = false; ok("mail outage reported as 502");

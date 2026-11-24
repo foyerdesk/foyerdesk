@@ -18,6 +18,7 @@
     "IDENTIFIER_PREFIX": "lavatti-logto-",
     "DEFAULT_CONTACT_NAME": "Lavatti participant",
     "REQUEST_MARKER": "lavatti_request_id",
+    "RETURN_PATHS": "/support,/talk",
     "FULL_PAGE_INBOX_ID": "5"
   },
   "durable_objects": {

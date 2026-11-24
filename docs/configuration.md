@@ -19,6 +19,7 @@ Settings are Cloudflare Worker **variables** (not secret, in the wrangler file) 
 | `CALLBACK_URI` | variable | yes | `https://<your-site>/api/auth/callback`. Its origin is the only origin the Worker answers on |
 | `IDENTIFIER_PREFIX` | variable | no | Start of the identifier stored on each Chatwoot contact. Default `foyerdesk-`. Never change it later |
 | `DEFAULT_CONTACT_NAME` | variable | no | Name given to a new contact until the provider reports a real one. Default `Customer` |
+| `RETURN_PATHS` | variable | no | Comma-separated pages a visitor may be sent back to after signing in, and where a failed sign-in is reported (the first one). Default `/support` |
 | `REQUEST_MARKER` | variable | no | Message attribute that carries the request id (recognises retries). Default `foyerdesk_request_id`. Never change it later |
 
 ## Sign-in
@@ -37,7 +38,7 @@ Settings are Cloudflare Worker **variables** (not secret, in the wrangler file) 
 `SUPPORT_SESSIONS`, `FULL_PAGE_THREAD`, `SUPPORT_STREAM` and `EMAIL_LINKS` are Durable Objects (classes `TestSupportSession`, `TestSupportThread`, `SupportStream`, `EmailLinkStore`; the first two keep a `Test` prefix because renaming needs a migration). `SITE_ASSETS` is an optional static assets binding.
 
 ## Fixed limits (in code)
-Session 15 minutes. Subject 3 to 120 characters, message up to 3000. At most 10 unresolved topics per customer. 25 topics a page, 20 messages a page. Emailed link valid 15 minutes, 3 links per address and 10 per IP in 10 minutes. After sign-in the visitor can only be sent back to `/talk` or `/support` (`returnPaths` in `worker.mjs`); another path needs a code change. A failed sign-in that is retried automatically goes back through `/talk`.
+Session 15 minutes. Subject 3 to 120 characters, message up to 3000. At most 10 unresolved topics per customer. 25 topics a page, 20 messages a page. Emailed link valid 15 minutes, 3 links per address and 10 per IP in 10 minutes. After sign-in the visitor can only be sent back to a path listed in `RETURN_PATHS` (default `/support`); a failed sign-in is reported on the first one.
 
 ## Screens
 `mountFoyerdesk(element, { lang, apiBase, authBase, loginUrl, brand })`. Languages: add `packages/ui/src/i18n/<code>.js` next to `en.js`, register it in `i18n/index.js`; a test fails when a key is missing or extra. Only English exists today.

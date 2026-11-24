@@ -19,7 +19,6 @@ Public repository with one-commit history, branch protection (check `test`), Dep
 ## Known gaps in the code
 - The Worker has an internal test mode (used when `FULL_PAGE_INBOX_ID` is unset) that exists only for the acceptance tests. Remove it and move those tests to the real path.
 - Two Durable Object classes are still named `TestSupportSession` and `TestSupportThread`. Renaming needs a migration.
-- After sign-in the visitor can only be sent back to `/talk` or `/support`, and an automatic sign-in retry goes through `/talk` (`returnPaths` and `restartOrFail` in `packages/worker/src/worker.mjs`). Make both configurable.
 - Only the emailed-link endpoint exists; the screens have no email field yet.
 - An existing Chatwoot contact with the same email but another identifier blocks sign-in (`explicit_contact_linking_required`). A safe linking flow is not designed.
 - No Docker image or Compose file. `wrangler dev` with `examples/dev.vars.example` is not covered by tests.

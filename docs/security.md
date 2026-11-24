@@ -13,7 +13,7 @@ How FoyerDesk is meant to protect customer conversations, and what is checked by
 | Messages are rendered as text, never as HTML | `packages/ui/src/dom.js` | screens (broken escaping was caught by a test) |
 | OpenID Connect: PKCE, state, nonce, signature, issuer, audience, verified email | `worker.mjs`, `oidc.mjs` | acceptance, unit |
 | Emailed link: hashed single-use token, confirm button, rate limits | `emaillink.mjs` | acceptance |
-| A visitor is only sent back to `/talk` or `/support` after sign-in | `worker.mjs` | acceptance |
+| A visitor is only sent back to a path listed in `RETURN_PATHS` after sign-in | `worker.mjs` | acceptance |
 | CSP on the Worker's own pages; `Cache-Control: no-store` on API answers | `worker.mjs` | acceptance |
 
 ## Not covered

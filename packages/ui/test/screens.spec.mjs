@@ -53,7 +53,7 @@ test("list: 25 per page with Previous and Next, and a Resolved tab", async ({ pa
 
 test("list: empty states say what to do", async ({ page }) => {
   await mockApi(page, { topics: [] });
-  await open(page);
+  await open(page, "/#/"); // the plain address would go to the new-topic form for a visitor with no topics
   await expect(page.getByTestId("empty")).toContainText("No topics yet");
   await page.getByTestId("tab-open").click();
   await expect(page.getByTestId("empty")).toContainText("No open topics");
@@ -450,4 +450,88 @@ test("phone: the topic table fits the screen without sideways scrolling", async 
   await expect(page.getByTestId("topic-row")).toHaveCount(3);
   expect(await page.locator(".fd-table-wrap").evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
   await expect(page.getByTestId("topic-row").first()).toContainText("Open");
+});
+
+// ---- taken over from the old single-conversation page ----
+test("a source link (?src=linkedin) is passed on with the sign-in link, kept for the tab, and a bad value is ignored", async ({ page }) => {
+  await mockApi(page, { signedIn: false });
+  await page.goto("/?src=LinkedIn");
+  await expect(page.getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/api/auth/login?returnTo=%2Ftalk&src=linkedin");
+  await page.goto("/?auth_error=x"); // the parameter is gone from the address, the tab still remembers it
+  await expect(page.getByRole("link", { name: "Sign in" })).toHaveAttribute("href", /&src=linkedin$/);
+});
+
+test("a bad source value is not sent", async ({ page }) => {
+  await mockApi(page, { signedIn: false });
+  await page.goto("/?src=" + encodeURIComponent("x y<script>"));
+  await expect(page.getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/api/auth/login?returnTo=%2Ftalk");
+});
+
+test("a visitor with no topics lands on the new-topic form; Back leads to the (empty) list and does not bounce", async ({ page }) => {
+  await mockApi(page, { topics: [] });
+  await open(page);
+  await expect(page.getByTestId("create")).toBeVisible();
+  await page.getByRole("link", { name: "Back" }).click();
+  await expect(page.getByTestId("create")).toHaveCount(0);
+  await page.waitForTimeout(300);
+  expect(new URL(page.url()).hash).toBe("#/");
+});
+
+test("a visitor with topics lands on the list", async ({ page }) => {
+  await mockApi(page, { topics: [row(1)] });
+  await open(page);
+  await expect(page.getByTestId("topic-row")).toHaveCount(1);
+  await expect(page.getByTestId("create")).toHaveCount(0);
+});
+
+test("when the topic list cannot be loaded nobody is sent to the new-topic form", async ({ page }) => {
+  await mockApi(page, { topics: [] });
+  await page.route("**/api/support/topics?**", (route) => route.fulfill({ status: 500, json: { error: "x" } }));
+  await open(page);
+  await page.waitForTimeout(800);
+  await expect(page.getByTestId("create")).toHaveCount(0);
+  expect(new URL(page.url()).hash).toBe("");
+});
+
+test("an unsent new topic survives a reload, is cleared by sending, and is never offered to another account", async ({ page }) => {
+  const api = await mockApi(page, { topics: [row(1)] });
+  await open(page, "/#/new");
+  await page.getByLabel("Subject (optional)").fill("Kept subject");
+  await page.getByLabel("Your question").fill("Kept text");
+  await page.reload();
+  await expect(page.getByLabel("Your question")).toHaveValue("Kept text");
+  await expect(page.getByLabel("Subject (optional)")).toHaveValue("Kept subject");
+  api.account = { name: "Someone Else", email: "else@example.com", provider: "email", picture: null };
+  await page.reload();
+  await expect(page.getByLabel("Your question")).toHaveValue("");
+  api.account = { name: "Alex Example", email: "alex@example.com", provider: "google", picture: null };
+  await page.getByLabel("Your question").fill("Send me");
+  await page.getByTestId("create").click();
+  await expect(page.getByTestId("topic-title")).toBeVisible();
+  await page.goto("/#/new"); await page.reload();
+  await expect(page.getByLabel("Your question")).toHaveValue("");
+});
+
+test("an unsent reply survives a reload and signing out deletes drafts", async ({ page }) => {
+  await mockApi(page, { topics: [row(1)], messages: { 1: [msg(1, "visitor", "Hi")] } });
+  await open(page, "/#/topic/1");
+  await page.getByLabel("Reply", { exact: true }).fill("Half a reply");
+  await page.reload();
+  await expect(page.getByLabel("Reply", { exact: true })).toHaveValue("Half a reply");
+  await page.getByTestId("sign-out").click();
+  await expect(page.getByTestId("guest-title")).toHaveText("You have signed out");
+  expect(await page.evaluate(() => Object.keys(sessionStorage).filter((k) => k.startsWith("foyerdesk-draft-")))).toEqual([]);
+});
+
+test("an ended session keeps the typed text and offers it again after signing in", async ({ page }) => {
+  const api = await mockApi(page, { topics: [row(1)], messages: { 1: [msg(1, "visitor", "Hi")] } });
+  await open(page, "/#/topic/1");
+  await page.getByLabel("Reply", { exact: true }).fill("Important words");
+  api.signedIn = false; // the session ends while the visitor is typing
+  await page.getByTestId("send").click();
+  await expect(page.getByTestId("guest-title")).toHaveText("Your session ended");
+  api.signedIn = true;
+  await open(page, "/#/topic/1"); // back after signing in, the visitor opens the topic again
+  await page.reload();
+  await expect(page.getByLabel("Reply", { exact: true })).toHaveValue("Important words");
 });

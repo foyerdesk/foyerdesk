@@ -1,6 +1,6 @@
 # Screens (packages/ui): plan
 
-Decisions (2026-11-24): several topics per customer; page `/talk` with a side panel (account, topics, Sign out) and a conversation with its own scroll; design follows DelvyG (list of topics as a table with status badges, create form, ticket card) and FreeScout (short "recent topics" list in the side panel with "View all N", tabs with paging); English only, one dictionary file per language; attachments off; statuses Open, Pending, Resolved.
+Decisions (2026-11-24): several topics per customer; the support page with a side panel (account, topics, Sign out) and a conversation with its own scroll; design follows DelvyG (list of topics as a table with status badges, create form, ticket card) and FreeScout (short "recent topics" list in the side panel with "View all N", tabs with paging); English only, one dictionary file per language; attachments off; statuses Open, Pending, Resolved.
 
 Technology: plain browser modules, no framework, no React. One call, `mountFoyerdesk(element, options)`, draws everything; an Astro page only holds the element and loads the script and the stylesheet. All text goes in with `textContent`, never as HTML (DelvyG's XSS in `ticket.ejs` is the case this avoids). The same module works on the old Vite site and on Astro.
 
