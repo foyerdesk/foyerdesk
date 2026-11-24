@@ -411,7 +411,7 @@ test("text typed while the side list is still loading is not wiped when the list
   const gate = new Promise((resolve) => { release = resolve; });
   await page.route("**/api/support/topics?tab=all&page=1", async (route) => { await gate; await route.fallback(); }, { times: 1 });
   await open(page);
-  await page.getByTestId("new-topic").click();
+  await page.locator('[data-testid="new-topic"]:visible, [data-testid="side-new-topic"]:visible').first().click();
   await page.getByLabel("Your question").fill("Half-written question");
   release();
   await expect(page.getByTestId("recent-item")).toHaveCount(3); // the list arrived
@@ -534,4 +534,28 @@ test("an ended session keeps the typed text and offers it again after signing in
   await open(page, "/#/topic/1"); // back after signing in, the visitor opens the topic again
   await page.reload();
   await expect(page.getByLabel("Reply", { exact: true })).toHaveValue("Important words");
+});
+
+// ---- found in the owner's screenshots of the live page ----
+test("desktop: with a short list, a heading above and a footer below, the account card stays under the host header while the page scrolls", async ({ page }, info) => {
+  test.skip(info.project.name !== "desktop", "wide screens only");
+  await page.setViewportSize({ width: 1372, height: 573 });
+  await mockApi(page, { topics: [row(1), row(2)] });
+  await open(page, "/?spacer=230&after=300");
+  await page.addStyleTag({ content: ".fd { --fd-chrome: 6.5rem; }" }); // the host's floating header covers the top 104px
+  await expect(page.getByTestId("topic-row")).toHaveCount(2);
+  await page.evaluate(() => window.scrollTo(0, 214)); // as far as the owner scrolled in the screenshot
+  await page.waitForTimeout(200);
+  expect(await page.evaluate(() => window.scrollY)).toBe(214);
+  const card = await page.getByTestId("account-card").boundingBox();
+  expect(card.y, "the card must not slide under the header").toBeGreaterThanOrEqual(104);
+  await expect(page.getByTestId("sign-out")).toBeInViewport({ ratio: 1 });
+});
+
+test("only one New topic button is visible on the list, on a wide screen and on a phone", async ({ page }) => {
+  await mockApi(page, { topics: [row(1), row(2)] });
+  await open(page);
+  await expect(page.getByTestId("topic-row")).toHaveCount(2);
+  const visible = await page.getByRole("link", { name: "New topic" }).evaluateAll((els) => els.filter((el) => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden").length);
+  expect(visible).toBe(1);
 });

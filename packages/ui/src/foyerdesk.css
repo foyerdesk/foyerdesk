@@ -39,7 +39,8 @@
 .fd-account { position:sticky; top:var(--fd-chrome,0px); z-index:5; display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; padding:8px 12px; }
 .fd-account .fd-account-row { flex:1; min-width:0; } .fd-account .fd-signout { flex:none; min-height:34px; padding:4px 14px; margin-left:auto; }
 @media (min-width:1024px) {
-  .fd-shell { grid-template-columns:17rem minmax(0,1fr); gap:1.5rem; }
+  .fd-shell { grid-template-columns:17rem minmax(0,1fr); gap:1.5rem; min-height:100dvh; } /* tall enough for the side column to stay in place while the page scrolls, even with a short list */
+  .fd-page-head [data-testid="new-topic"] { display:none; } /* the side column already has New topic; the phone has no side column */
   .fd-side { display:flex; flex-direction:column; gap:.75rem; position:sticky; top:calc(var(--fd-chrome,0px) + 1rem); align-self:start; max-height:calc(100dvh - var(--fd-chrome,0px) - 2rem); }
   .fd-side { min-width:0; } .fd-account { position:static; flex:none; flex-direction:column; flex-wrap:nowrap; align-items:stretch; padding:16px; } .fd-account .fd-signout { margin-left:0; width:100%; }
   .fd-aside { flex:1; min-height:0; }

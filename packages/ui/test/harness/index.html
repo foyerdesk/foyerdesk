@@ -1,9 +1,11 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Support</title>
 <link rel="stylesheet" href="/src/foyerdesk.css"></head>
-<body><div id="app"></div>
+<body><div id="spacer"></div><div id="app"></div><div id="after"></div>
 <script type="module">
   import { mountFoyerdesk } from "/src/foyerdesk.js";
   const lang = new URLSearchParams(location.search).get("lang") ?? undefined;
+  document.getElementById("spacer").style.height = (new URLSearchParams(location.search).get("spacer") ?? "0") + "px"; // stands in for a host page heading above the screens
+  document.getElementById("after").style.height = (new URLSearchParams(location.search).get("after") ?? "0") + "px"; // and for a footer below them
   window.__fd = mountFoyerdesk(document.getElementById("app"), { lang, loginUrl: "/api/auth/login?returnTo=%2Ftalk", headingLevel: new URLSearchParams(location.search).get("level") === "2" ? 2 : 1 });
 </script></body></html>

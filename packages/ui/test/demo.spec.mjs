@@ -8,7 +8,7 @@ test("demo: topics show, a new topic and a reply work, resolve and sign out", as
   test.skip(info.project.name !== "desktop", "state is shared, run once");
   await page.goto(demo + "/");
   await expect(page.getByTestId("topic-row")).toHaveCount(3);
-  await page.getByTestId("new-topic").click();
+  await page.locator('[data-testid="new-topic"]:visible, [data-testid="side-new-topic"]:visible').first().click();
   await page.getByLabel("Your question").fill("Demo question\nwith a second line");
   await page.getByTestId("create").click();
   await expect(page.getByTestId("topic-title")).toHaveText("Demo question");
