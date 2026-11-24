@@ -7,7 +7,7 @@ export default {
   guestTitle: "Sign in to start or continue your conversation",
   guestDefault: "Sign in with your account. It takes a few seconds.",
   signedOutTitle: "You have signed out",
-  signedOutBody: "Your conversation is saved and will be here when you sign in again.",
+  signedOutBody: "Your conversation is saved and will be here when you sign in again. On a shared computer, also sign out of the account you used to sign in, for example Google or LinkedIn.",
   expiredTitle: "Your session ended",
   expiredBody: "Sign in to continue.",
   authErrorTitle: "Sign-in could not be completed",

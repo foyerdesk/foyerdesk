@@ -194,7 +194,8 @@ try {
     const [id, signature] = value.split(".");
     assert.equal(signature.length, 43);
     assert.equal((await call("/api/support/session", { headers: { Cookie: real } })).status, 200);
-    for (const forged of [id, id + "." + "A".repeat(43), id + "." + signature.slice(0, -1) + (signature.endsWith("A") ? "B" : "A"), "A".repeat(43) + "." + signature]) {
+    // The first character is changed: the last character of a 43-character base64url value carries two unused bits, so changing it can leave the bytes (and the signature) intact.
+    for (const forged of [id, id + "." + "A".repeat(43), id + "." + (signature[0] === "A" ? "B" : "A") + signature.slice(1), "A".repeat(43) + "." + signature]) {
       assert.equal((await call("/api/support/session", { headers: { Cookie: "__Host-foyerdesk-session=" + forged } })).status, 401, forged);
     }
   });

@@ -206,7 +206,7 @@ test("sign out: notice and focus, the live connection closes, nothing is asked a
   await expect.poll(() => api.sockets.length).toBe(1);
   await page.getByTestId("sign-out").click();
   await expect(page.getByTestId("guest-title")).toHaveText("You have signed out");
-  await expect(page.getByTestId("guest-notice")).toHaveText("Your conversation is saved and will be here when you sign in again.");
+  await expect(page.getByTestId("guest-notice")).toHaveText("Your conversation is saved and will be here when you sign in again. On a shared computer, also sign out of the account you used to sign in, for example Google or LinkedIn.");
   await expect(page.getByRole("link", { name: "Sign in again" })).toBeVisible();
   await expect(page.getByTestId("guest-title")).toBeFocused();
   expect(new URL(page.url()).hash).toBe(""); // no stale "#/topic/..." in the address

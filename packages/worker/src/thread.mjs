@@ -216,6 +216,20 @@ export class TestSupportThread extends DurableObject {
     });
   }
 
+  // Did this request already write its message into the topic? Chatwoot returns 20 messages per page, so walk back
+  // page by page (up to 5 pages, 100 messages) instead of trusting only the latest 20.
+  async hasMarker(id, requestId) {
+    let before;
+    for (let page = 0; page < 5; page += 1) {
+      const raw = (await this.api(`/conversations/${id}/messages` + (before ? `?before=${before}` : ""))).payload ?? [];
+      if (raw.some((m) => m.message_type === 0 && m.content_attributes?.[requestMarker] === requestId)) return true;
+      const oldest = Math.min(...raw.map((m) => m.id).filter(Number.isFinite));
+      if (raw.length < 20 || !Number.isFinite(oldest)) return false;
+      before = oldest;
+    }
+    return false;
+  }
+
   async replyTopic(mapping, id, requestId, text) {
     if (this.tooMany()) return { error: "rate_limited" };
     const message = topics.cleanText(text);
@@ -230,8 +244,7 @@ export class TestSupportThread extends DurableObject {
       if (seen && seen.digest !== digest) return { error: "conflict" };
       if (seen?.status === "accepted") return { accepted: true, repeated: true };
       if (seen) { // unknown outcome: read the topic back before writing again
-        const raw = (await this.api(`/conversations/${id}/messages`)).payload;
-        if (raw.some((m) => m.message_type === 0 && m.content_attributes?.[requestMarker] === requestId)) {
+        if (await this.hasMarker(id, requestId)) {
           await this.ctx.storage.put(key, { at: Date.now(), digest, status: "accepted" });
           return { accepted: true, repeated: true };
         }

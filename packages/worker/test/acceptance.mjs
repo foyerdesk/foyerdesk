@@ -454,6 +454,16 @@ try {
   assert.equal(closedWith, 4401);
   assert.deepEqual(two.received.filter((m) => m !== "pong"), []); // the other contact's channel is untouched
   checks.push("Signing out closes the contact's open live channel; another contact's channel stays open");
+  // A page left open past its session lifetime is closed by the object itself (code 4401), not kept alive indefinitely.
+  // The object is called directly: the sandbox does not relay a close made outside a request to the test client,
+  // so the check is whether the object still counts the channel as open (notify returns the number of open channels).
+  const lifetimeStream = (await worker.getDurableObjectNamespace("SUPPORT_STREAM")).getByName(`inbox-4-contact-${secondContact}`);
+  assert.equal(await lifetimeStream.closeExpired(Date.now()), 0);
+  assert.equal(await lifetimeStream.notify(), 1);
+  assert.equal(await lifetimeStream.closeExpired(Date.now() + 16 * 60 * 1000), 1);
+  assert.equal(await lifetimeStream.notify(), 0);
+  assert.equal(await lifetimeStream.closeExpired(Date.now() + 16 * 60 * 1000), 0);
+  checks.push("A live channel is closed once the session it was opened with has expired; before that it stays open");
   one.socket.close(); two.socket.close();
   contacts.push({ id: 900, email: "legacy@example.invalid", identifier: null, additional_attributes: { city: "Cairo", created_at_ip: "203.0.113.5" }, contact_inboxes: [{ inbox: { id: 2 }, source_id: "w" }] });
   const before = contacts.length;
@@ -678,6 +688,19 @@ try {
   assert.equal((await post(topicA, `/${mine}/messages`, { requestId: repLost, message: "Reply with lost answer" })).status, 200);
   assert.equal(topicRows.find((r) => r.id === mine).messages.filter((m) => m.content === "Reply with lost answer").length, 1);
   checks.push("A reply is written once even when the request is repeated or the answer was lost");
+  // The marker of a lost reply may sit further back than Chatwoot's first page of 20 messages.
+  // Another customer is used so the first customer's write allowance stays as the later tests expect; the topic is removed afterwards.
+  const deepTopic = (await asJson(await post(topicB, "", { requestId: randomUUID(), message: "Topic for the buried reply" }))).body.id;
+  topicFault = "reply_committed_then_lost";
+  const repDeep = randomUUID();
+  assert.equal((await post(topicB, `/${deepTopic}/messages`, { requestId: repDeep, message: "Reply buried later" })).status, 503);
+  topicFault = "none";
+  const deepRow = topicRows.find((r) => r.id === deepTopic);
+  for (let i = 0; i < 25; i += 1) deepRow.messages.push({ id: deepRow.messages.length + 1, message_type: 1, content: "Team note " + i, private: false });
+  assert.equal((await post(topicB, `/${deepTopic}/messages`, { requestId: repDeep, message: "Reply buried later" })).status, 200);
+  assert.equal(deepRow.messages.filter((m) => m.content === "Reply buried later").length, 1);
+  topicRows.splice(topicRows.indexOf(deepRow), 1);
+  checks.push("A repeated reply finds its marker even when 25 other messages arrived after it, so it is not written twice");
   const closed = await asJson(await post(topicA, `/${mine}/resolve`, {}));
   assert.deepEqual([closed.status, closed.body.status, closed.body.actions], [200, "Resolved", ["reply", "reopen"]]);
   assert.deepEqual(Object.keys(closed.body).sort(), contract.statusChange);

@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { readLimited } from "./limits.mjs";
+import { sessionLifetime } from "./session.mjs";
 
 // Chatwoot tells the Worker (signed webhook) that a reply exists; the open page is told "changed" over a
 // hibernating WebSocket and then reads the messages through the normal authenticated history request.
@@ -22,9 +23,31 @@ export class SupportStream extends DurableObject {
       try { socket.close(1000, "replaced"); } catch { /* already closed */ }
     }
     const [client, server] = Object.values(new WebSocketPair());
+    // The page's session ends after sessionLifetime; the channel must not outlive it.
+    const until = Date.now() + sessionLifetime * 1000;
+    server.serializeAttachment({ until });
     this.ctx.acceptWebSocket(server);
+    const next = await this.ctx.storage.getAlarm();
+    if (next === null || next > until) await this.ctx.storage.setAlarm(until);
     return new Response(null, { status: 101, webSocket: client });
   }
+
+  // Closes every channel whose session has run out (code 4401, the page signs in again) and returns how many.
+  // One alarm is kept for the nearest remaining expiry.
+  async closeExpired(now = Date.now()) {
+    let closed = 0, nearest = null;
+    for (const socket of this.ctx.getWebSockets()) {
+      const until = socket.deserializeAttachment()?.until;
+      if (typeof until === "number" && until <= now) {
+        try { socket.close(4401, "session_expired"); closed += 1; } catch { /* already closed */ }
+      } else if (typeof until === "number" && (nearest === null || until < nearest)) nearest = until;
+    }
+    if (nearest === null) await this.ctx.storage.deleteAlarm();
+    else await this.ctx.storage.setAlarm(nearest);
+    return closed;
+  }
+
+  async alarm() { await this.closeExpired(); }
 
   async notify(conversationId) {
     let sent = 0;
