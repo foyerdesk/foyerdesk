@@ -20,6 +20,6 @@
     "media": "mkdir -p ../../.media ../../docs/screenshots && SHOTS=../../.media playwright test media && sh scripts/gif.sh ../../.media && cp ../../.media/*.png ../../.media/demo.gif ../../docs/screenshots/ && node -e \"require('fs').unlinkSync('../../docs/screenshots/palette.png')\""
   },
   "devDependencies": {
-    "@playwright/test": "1.64.1"
+    "@playwright/test": "1.65.1"
   }
 }
