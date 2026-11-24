@@ -11,6 +11,6 @@
     "test:acceptance": "npm run build:test && node test/acceptance.mjs .build/worker.js && node test/emaillink.mjs .build/worker.js && node test/oidc-negative.mjs .build/worker.js",
     "test:live": "npm run build:test && node test/live-topics.mjs .build/worker.js"
   },
-  "dependencies": { "jose": "5.10.0" },
+  "dependencies": { "jose": "6.2.18" },
   "devDependencies": { "miniflare": "5.20261012.0-beta", "wrangler": "4.151.0" }
 }
