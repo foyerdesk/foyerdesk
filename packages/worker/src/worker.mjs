@@ -182,7 +182,7 @@ const textHeaders = { "Cache-Control": "no-store", "Referrer-Policy": "no-referr
 // POST /api/auth/email/start  {email, returnTo?, src?}: always answers the same for a valid address, so it cannot be
 // used to find out who has an account.
 async function emailStart(request, url, env) {
-  if (!env.EMAIL_LINKS) return result(404, { error: "not_found" });
+  if (!env.EMAIL_LINKS || !env.MAIL_PROVIDER) return result(404, { error: "not_found" }); // off unless a mail service is set
   if (request.headers.get("Origin") !== url.origin) return result(403, { error: "same_origin_required" });
   let data;
   try { data = await request.json(); } catch { return result(400, { error: "invalid_body" }); }
@@ -211,7 +211,7 @@ async function emailStart(request, url, env) {
 
 // GET shows a confirm button; POST uses the token.
 async function emailVerify(request, url, env) {
-  if (!env.EMAIL_LINKS) return result(404, { error: "not_found" });
+  if (!env.EMAIL_LINKS || !env.MAIL_PROVIDER) return result(404, { error: "not_found" }); // off unless a mail service is set
   if (request.method === "GET") {
     const token = url.searchParams.get("token") ?? "";
     if (!tokenPattern.test(token)) return new Response("This link is not valid.", { status: 400, headers: textHeaders });

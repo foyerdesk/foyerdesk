@@ -49,6 +49,13 @@ const worker = new Miniflare(convertV4MiniflareOptions({
     MAIL_PROVIDER: "resend", RESEND_API_KEY: "re_fixture", EMAIL_LINK_FROM: "Support <support@example.invalid>", EMAIL_LINK_BRAND: "Fixture",
   },
 }));
+// Without MAIL_PROVIDER the whole feature is off, even when the store is bound.
+const off = new Miniflare(convertV4MiniflareOptions({
+  modules: true, script, compatibilityDate: "2026-10-19",
+  durableObjects: { SUPPORT_SESSIONS: { className: "TestSupportSession", useSQLite: true, unsafeUniqueKey: "off-sessions" }, FULL_PAGE_THREAD: { className: "TestSupportThread", useSQLite: true, unsafeUniqueKey: "off-thread" }, SUPPORT_STREAM: { className: "SupportStream", useSQLite: true, unsafeUniqueKey: "off-stream" }, EMAIL_LINKS: { className: "EmailLinkStore", useSQLite: true, unsafeUniqueKey: "off-links" } },
+  isolatedResourcePersistencePath: persistence + "-off", resourcePersistencePath: persistence + "-off", outboundService: upstream,
+  bindings: { CALLBACK_URI: site + "/api/auth/callback", CHATWOOT_BASE_URL: "https://chat.example.invalid", CHATWOOT_ACCOUNT_ID: "1", FULL_PAGE_INBOX_ID: "4" },
+}));
 const call = (path, options = {}) => worker.dispatchFetch(site + path, { redirect: "manual", ...options });
 const start = (email, extra = {}, headers = {}) => call("/api/auth/email/start", { method: "POST", headers: { Origin: site, "Content-Type": "application/json", ...headers }, body: JSON.stringify({ email, ...extra }) });
 const tokenOf = (mail) => new URL(mail.text.match(/https:\S+/)[0]).searchParams.get("token");
@@ -97,6 +104,10 @@ try {
   mailFails = true;
   assert.equal((await start("down@example.com")).status, 502); mailFails = false; ok("mail outage reported as 502");
 
+  const offStart = await off.dispatchFetch(site + "/api/auth/email/start", { method: "POST", headers: { Origin: site, "Content-Type": "application/json" }, body: JSON.stringify({ email: "a@b.co" }) });
+  assert.equal(offStart.status, 404);
+  assert.equal((await off.dispatchFetch(site + "/api/auth/email/verify?token=" + "A".repeat(43))).status, 404); ok("emailed link is off when no mail service is configured");
+
   // Disabled when the store is not bound is covered by the route returning 404; here the feature is on.
   console.log(checks.map((c) => "PASS " + c).join("\n"));
-} finally { await worker.dispose(); }
+} finally { await worker.dispose(); await off.dispose(); }
