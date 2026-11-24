@@ -2,10 +2,16 @@
 // IDENTIFIER_PREFIX starts the identifier stored on each Chatwoot contact (changing it later orphans existing contacts).
 // DEFAULT_CONTACT_NAME is the name given to a contact until the sign-in provider reports a real one.
 let base = null;
+// Drops trailing slashes without a regular expression (a long run of slashes would make one slow).
+export function trimSlashes(text) {
+  let end = text.length;
+  while (end > 0 && text[end - 1] === "/") end--;
+  return text.slice(0, end);
+}
 let identifierPrefix = "foyerdesk-";
 let defaultName = "Customer";
 export function configureChatwoot(env) {
-  const origin = String(env.CHATWOOT_BASE_URL ?? "").replace(/\/+$/, "");
+  const origin = trimSlashes(String(env.CHATWOOT_BASE_URL ?? ""));
   const account = String(env.CHATWOOT_ACCOUNT_ID ?? "");
   if (!/^https:\/\/[a-z0-9.-]+(?::[0-9]+)?$/i.test(origin) || !/^[0-9]{1,9}$/.test(account)) throw new Error("invalid_chatwoot_settings");
   base = `${origin}/api/v1/accounts/${account}/contacts`;

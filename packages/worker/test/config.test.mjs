@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { configureChatwoot, participantIdentifier } from "../src/contact.mjs";
+import { configureChatwoot, participantIdentifier, trimSlashes } from "../src/contact.mjs";
 
 test("no Chatwoot address or account is assumed: both must be set", () => {
   assert.throws(() => configureChatwoot({}), /invalid_chatwoot_settings/);
@@ -14,4 +14,12 @@ test("the contact identifier starts with foyerdesk- unless the site sets its own
   assert.match(await participantIdentifier("https://idp.example", "u1"), /^foyerdesk-[0-9a-f]{64}$/);
   configureChatwoot({ CHATWOOT_BASE_URL: "https://chat.example.com", CHATWOOT_ACCOUNT_ID: "7", IDENTIFIER_PREFIX: "acme-" });
   assert.match(await participantIdentifier("https://idp.example", "u1"), /^acme-[0-9a-f]{64}$/);
+});
+
+test("trailing slashes are dropped, also a very long run, quickly", () => {
+  assert.equal(trimSlashes("https://chat.example.com///"), "https://chat.example.com");
+  assert.equal(trimSlashes("https://chat.example.com"), "https://chat.example.com");
+  const started = Date.now();
+  trimSlashes("a" + "/".repeat(200000) + "b");
+  assert.ok(Date.now() - started < 200);
 });

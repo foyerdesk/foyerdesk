@@ -1,7 +1,8 @@
 import { DurableObject } from "cloudflare:workers";
 import * as topics from "./topics.mjs";
+import { trimSlashes } from "./contact.mjs";
 
-const chatwootOrigin = (env) => String(env.CHATWOOT_BASE_URL).replace(/\/+$/, "");
+const chatwootOrigin = (env) => trimSlashes(String(env.CHATWOOT_BASE_URL));
 const base = (env) => `${chatwootOrigin(env)}/api/v1/accounts/${String(env.CHATWOOT_ACCOUNT_ID)}`;
 // Name of the message attribute that carries the visitor's request id, so a retried request is recognised. Changing it loses that recognition for old messages.
 let requestMarker = "foyerdesk_request_id";
