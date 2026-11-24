@@ -33,6 +33,8 @@ Public repository with one-commit history, branch protection (check `test`), Dep
 - No external security review.
 
 ## Planned features (not implemented)
+The comparison with the reference projects, with priorities, is in [REFERENCE_GAP.md](REFERENCE_GAP.md).
+0. Sliding session with an absolute cap (today fixed 15 minutes after sign-in).
 1. Email field on the sign-in card for the emailed link.
 2. A mode for sites that already have their own users (the site signs a short token).
 3. Attachments, after server-side type and size checks and a security review.
